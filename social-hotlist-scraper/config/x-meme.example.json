@@ -1,0 +1,101 @@
+{
+  "global": {
+    "maxPostsPerTarget": 10,
+    "maxRecordsPerPlatform": 50,
+    "minCommentCount": 0,
+    "minHotScore": 0,
+    "delayMs": 1200,
+    "outputDir": "./data/runs"
+  },
+  "tiktok": {
+    "enabled": false,
+    "targets": []
+  },
+  "instagram": {
+    "enabled": false,
+    "targets": []
+  },
+  "amazon": {
+    "enabled": false,
+    "targets": []
+  },
+  "fastmoss": {
+    "enabled": false,
+    "targets": []
+  },
+  "x": {
+    "enabled": true,
+    "bearerTokenEnv": "X_BEARER_TOKEN",
+    "lookbackDays": 30,
+    "scanLimitPerTarget": 100,
+    "exclude": ["replies", "retweets"],
+    "memeKeywords": [
+      "meme",
+      "meme coin",
+      "memecoin",
+      "meme token",
+      "meme币",
+      "迷因币",
+      "土狗",
+      "$DOGE",
+      "$SHIB",
+      "$PEPE",
+      "$BONK",
+      "$WIF",
+      "$FLOKI",
+      "dogecoin",
+      "shib",
+      "pepe",
+      "bonk",
+      "dogwifhat",
+      "floki",
+      "pump.fun",
+      "pumpfun",
+      "dexscreener",
+      "dextools",
+      "gmgn",
+      "contract address",
+      "ca:",
+      "solana meme",
+      "base meme"
+    ],
+    "targets": [
+      {
+        "type": "profile",
+        "value": "MustStopMurad",
+        "limit": 12,
+        "keywords": ["meme", "memecoin", "meme coin", "$SPX", "$MOG", "$GIGA"]
+      },
+      {
+        "type": "profile",
+        "value": "blknoiz06",
+        "limit": 10,
+        "keywords": ["$WIF", "$BONK", "$POPCAT", "$FARTCOIN", "solana meme"]
+      },
+      {
+        "type": "profile",
+        "value": "DegenerateNews",
+        "limit": 10,
+        "keywords": ["meme", "memecoin", "$DOGE", "$PEPE", "pump.fun"]
+      },
+      {
+        "type": "profile",
+        "value": "lookonchain",
+        "limit": 10,
+        "keywords": ["memecoin", "$TRUMP", "$PEPE", "$BONK", "smart money"]
+      },
+      {
+        "type": "profile",
+        "value": "ai_9684xtpa",
+        "limit": 10,
+        "keywords": ["meme", "Meme", "土狗", "pump.fun", "$PEPE"]
+      },
+      {
+        "type": "profile",
+        "value": "tier10k",
+        "limit": 8,
+        "keywords": ["meme coin", "memecoin", "$DOGE", "$SHIB", "$PEPE"]
+      }
+    ]
+  }
+}

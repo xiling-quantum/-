@@ -1,0 +1,276 @@
+{
+  "global": {
+    "headless": true,
+    "maxPostsPerTarget": 12,
+    "maxRecordsPerPlatform": 10,
+    "minCommentCount": 100,
+    "maxSocialPostAgeDays": 7,
+    "minHotScore": 10000,
+    "minAmazonSalesCount": 10000,
+    "delayMs": 1800,
+    "navigationTimeoutMs": 45000,
+    "retries": 2,
+    "outputDir": "./data/runs"
+  },
+  "tiktok": {
+    "enabled": false,
+    "storageState": "./storage/tiktok-state.json",
+    "sessionMode": "storageState",
+    "persistentProfile": {
+      "enabled": false,
+      "userDataDir": "C:/Users/PC/AppData/Local/Google/Chrome/User Data",
+      "profileDirectory": "Default",
+      "channel": "chrome"
+    },
+    "targets": []
+  },
+  "instagram": {
+    "enabled": true,
+    "storageState": "./storage/instagram-state.json",
+    "sessionMode": "storageState",
+    "persistentProfile": {
+      "enabled": false,
+      "userDataDir": "C:/Users/PC/AppData/Local/Google/Chrome/User Data",
+      "profileDirectory": "Default",
+      "channel": "chrome"
+    },
+    "targets": [
+      {
+        "type": "hashtag",
+        "value": "amazonfinds",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "kitchengadgets",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "homeorganization",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "amazonmusthaves",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "homefinds",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "cleaninghacks",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "skincare",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "beautyfinds",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "travelmusthaves",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "amazonhome",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "selfcare",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "viralfinds",
+        "limit": 20
+      },
+      {
+        "type": "profile",
+        "value": "instagram",
+        "limit": 12
+      },
+      {
+        "type": "hashtag",
+        "value": "viralproducts",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "musthaveproducts",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "gadgetfinds",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "beautytools",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "makeupfinds",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "haircare",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "fitnessfinds",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "petfinds",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "caraccessories",
+        "limit": 20
+      },
+      {
+        "type": "hashtag",
+        "value": "dormroomessentials",
+        "limit": 20
+      }
+    ]
+  },
+  "amazon": {
+    "enabled": true,
+    "storageState": null,
+    "sessionMode": "storageState",
+    "persistentProfile": {
+      "enabled": false,
+      "userDataDir": "",
+      "profileDirectory": "Default",
+      "channel": "chrome"
+    },
+    "targets": [
+      {
+        "type": "new-releases",
+        "value": "all",
+        "limit": 2
+      },
+      {
+        "type": "movers-shakers",
+        "value": "all",
+        "limit": 2
+      },
+      {
+        "type": "search",
+        "value": "kitchen gadgets",
+        "limit": 1
+      },
+      {
+        "type": "search",
+        "value": "home organization",
+        "limit": 1
+      },
+      {
+        "type": "search",
+        "value": "cleaning supplies",
+        "limit": 1
+      },
+      {
+        "type": "search",
+        "value": "travel essentials",
+        "limit": 1
+      },
+      {
+        "type": "search",
+        "value": "phone accessories",
+        "limit": 1
+      },
+      {
+        "type": "search",
+        "value": "beauty products",
+        "limit": 1
+      }
+    ]
+  },
+  "fastmoss": {
+    "enabled": true,
+    "maxRecordsPerPlatform": 20,
+    "storageState": null,
+    "sessionMode": "storageState",
+    "persistentProfile": {
+      "enabled": false,
+      "userDataDir": "",
+      "profileDirectory": "Default",
+      "channel": "chrome"
+    },
+    "targets": [
+      {
+        "type": "hotvideo",
+        "value": "US",
+        "limit": 10
+      },
+      {
+        "type": "hotlist",
+        "value": "US",
+        "limit": 10
+      }
+    ]
+  },
+  "x": {
+    "enabled": false,
+    "bearerTokenEnv": "X_BEARER_TOKEN",
+    "lookbackDays": 30,
+    "scanLimitPerTarget": 100,
+    "exclude": ["replies", "retweets"],
+    "memeKeywords": [
+      "meme",
+      "meme coin",
+      "memecoin",
+      "meme token",
+      "meme币",
+      "迷因币",
+      "土狗",
+      "$DOGE",
+      "$SHIB",
+      "$PEPE",
+      "$BONK",
+      "$WIF",
+      "$FLOKI",
+      "dogecoin",
+      "shib",
+      "pepe",
+      "bonk",
+      "dogwifhat",
+      "floki",
+      "pump.fun",
+      "pumpfun",
+      "dexscreener",
+      "dextools",
+      "gmgn",
+      "contract address",
+      "ca:",
+      "solana meme",
+      "base meme"
+    ],
+    "targets": [
+      {
+        "type": "profile",
+        "value": "example_blogger",
+        "limit": 10
+      }
+    ]
+  }
+}

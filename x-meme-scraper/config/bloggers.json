@@ -1,0 +1,62 @@
+{
+  "lookbackDays": 30,
+  "scanLimitPerBlogger": 80,
+  "maxPostsPerBlogger": 12,
+  "exclude": ["replies", "retweets"],
+  "keywords": [
+    "meme",
+    "meme coin",
+    "memecoin",
+    "meme token",
+    "meme币",
+    "迷因币",
+    "土狗",
+    "$DOGE",
+    "$SHIB",
+    "$PEPE",
+    "$BONK",
+    "$WIF",
+    "$FLOKI",
+    "dogecoin",
+    "shib",
+    "pepe",
+    "bonk",
+    "dogwifhat",
+    "floki",
+    "pump.fun",
+    "pumpfun",
+    "dexscreener",
+    "dextools",
+    "gmgn",
+    "contract address",
+    "ca:",
+    "solana meme",
+    "base meme"
+  ],
+  "bloggers": [
+    {
+      "handle": "MustStopMurad",
+      "keywords": ["meme", "memecoin", "meme coin", "$SPX", "$MOG", "$GIGA"]
+    },
+    {
+      "handle": "blknoiz06",
+      "keywords": ["$WIF", "$BONK", "$POPCAT", "$FARTCOIN", "solana meme"]
+    },
+    {
+      "handle": "DegenerateNews",
+      "keywords": ["meme", "memecoin", "$DOGE", "$PEPE", "pump.fun"]
+    },
+    {
+      "handle": "lookonchain",
+      "keywords": ["memecoin", "$TRUMP", "$PEPE", "$BONK", "smart money"]
+    },
+    {
+      "handle": "ai_9684xtpa",
+      "keywords": ["meme", "Meme", "土狗", "pump.fun", "$PEPE"]
+    },
+    {
+      "handle": "tier10k",
+      "keywords": ["meme coin", "memecoin", "$DOGE", "$SHIB", "$PEPE"]
+    }
+  ]
+}

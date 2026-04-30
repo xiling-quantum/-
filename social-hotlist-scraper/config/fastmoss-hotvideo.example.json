@@ -1,0 +1,49 @@
+{
+  "global": {
+    "headless": true,
+    "maxPostsPerTarget": 20,
+    "maxRecordsPerPlatform": 10,
+    "minCommentCount": 0,
+    "maxSocialPostAgeDays": 7,
+    "minHotScore": 0,
+    "minAmazonSalesCount": 10000,
+    "delayMs": 1200,
+    "navigationTimeoutMs": 45000,
+    "retries": 2,
+    "outputDir": "./data/runs"
+  },
+  "tiktok": {
+    "enabled": false,
+    "targets": []
+  },
+  "instagram": {
+    "enabled": false,
+    "targets": []
+  },
+  "amazon": {
+    "enabled": false,
+    "targets": []
+  },
+  "fastmoss": {
+    "enabled": true,
+    "storageState": null,
+    "sessionMode": "storageState",
+    "persistentProfile": {
+      "enabled": false,
+      "userDataDir": "",
+      "profileDirectory": "Default",
+      "channel": "chrome"
+    },
+    "targets": [
+      {
+        "type": "hotvideo",
+        "value": "US",
+        "limit": 10
+      }
+    ]
+  },
+  "x": {
+    "enabled": false,
+    "targets": []
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "global": {
+    "headless": false,
+    "maxPostsPerTarget": 5,
+    "delayMs": 1800,
+    "navigationTimeoutMs": 45000,
+    "retries": 1,
+    "outputDir": "./data/runs"
+  },
+  "tiktok": {
+    "enabled": false,
+    "targets": []
+  },
+  "instagram": {
+    "enabled": false,
+    "targets": []
+  },
+  "amazon": {
+    "enabled": false,
+    "targets": []
+  },
+  "fastmoss": {
+    "enabled": true,
+    "storageState": null,
+    "sessionMode": "storageState",
+    "persistentProfile": {
+      "enabled": false,
+      "userDataDir": "",
+      "profileDirectory": "Default",
+      "channel": "chrome"
+    },
+    "targets": [
+      {
+        "type": "saleslist",
+        "value": "US",
+        "limit": 5
+      },
+      {
+        "type": "new-products",
+        "value": "US",
+        "limit": 5
+      },
+      {
+        "type": "hotlist",
+        "value": "US",
+        "limit": 5
+      }
+    ]
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "global": {
+    "headless": true,
+    "maxPostsPerTarget": 4,
+    "delayMs": 1800,
+    "navigationTimeoutMs": 45000,
+    "retries": 2,
+    "outputDir": "./data/runs"
+  },
+  "tiktok": {
+    "enabled": true,
+    "storageState": "./storage/tiktok-state.json",
+    "sessionMode": "persistentProfile",
+    "persistentProfile": {
+      "enabled": true,
+      "userDataDir": "./tmp/edge-user-data-copy",
+      "profileDirectory": "Default",
+      "channel": "msedge"
+    },
+    "targets": [
+      {
+        "type": "hashtag",
+        "value": "amazonfinds",
+        "limit": 4
+      },
+      {
+        "type": "hashtag",
+        "value": "tiktokmademebuyit",
+        "limit": 4
+      },
+      {
+        "type": "hashtag",
+        "value": "kitchengadgets",
+        "limit": 4
+      },
+      {
+        "type": "hashtag",
+        "value": "homeorganization",
+        "limit": 4
+      }
+    ]
+  },
+  "instagram": {
+    "enabled": false,
+    "targets": []
+  },
+  "amazon": {
+    "enabled": false,
+    "targets": []
+  }
+}

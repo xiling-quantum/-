@@ -1,0 +1,16 @@
+{
+  "smtp": {
+    "host": "smtp.qq.com",
+    "port": 465,
+    "secure": true,
+    "user": "your_qq_mail@qq.com",
+    "pass": "your_qq_smtp_auth_code"
+  },
+  "mail": {
+    "from": "your_qq_mail@qq.com",
+    "to": [
+      "your_qq_mail@qq.com"
+    ],
+    "subjectPrefix": "币安涨跌榜日报"
+  }
+}

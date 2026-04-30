@@ -1,0 +1,19 @@
+{
+  "name": "x-meme-scraper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Independent local dashboard for collecting meme-coin related X posts from configured bloggers.",
+  "scripts": {
+    "start": "node ./src/server.js",
+    "scrape:browser": "node ./src/browser-scrape.js",
+    "scrape:heyi": "node ./src/browser-scrape.js --user heyibinance --max 20",
+    "check": "node --check ./src/server.js && node --check ./src/browser-scrape.js"
+  },
+  "dependencies": {
+    "playwright": "^1.56.0"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

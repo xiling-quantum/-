@@ -1,0 +1,28 @@
+{
+  "channels": [
+    "wallstreetbets",
+    "cryptomemes",
+    "solanamemes"
+  ],
+  "keywords": [
+    "meme",
+    "memecoin",
+    "shitcoin",
+    "cto",
+    "pump",
+    "raid",
+    "trenches",
+    "degen",
+    "moon",
+    "cat",
+    "dog",
+    "pepe",
+    "wojak",
+    "bonk"
+  ],
+  "since_days": 7,
+  "limit_per_channel": 500,
+  "require_keyword_match": true,
+  "require_media": false,
+  "output_dir": "output"
+}

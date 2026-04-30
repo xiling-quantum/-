@@ -1,0 +1,30 @@
+{
+  "name": "social-hotlist-scraper",
+  "version": "0.1.0",
+  "description": "Independent social media scraping project for TikTok and Instagram hot item scouting.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "auth": "node ./src/auth.js",
+    "import-cookies": "node ./src/import-cookies.js",
+    "collect": "node ./src/collect.js",
+    "collect:x": "node ./src/collect.js --config ./config/x-meme.example.json --platform x",
+    "daily": "node ./src/daily.js",
+    "feishu": "node ./src/feishu-push.js",
+    "daily:feishu": "node ./src/daily.js && node ./src/feishu-push.js",
+    "binance-daily": "node ./src/binance-daily.js",
+    "binance-email": "node ./src/binance-email.js",
+    "binance-dashboard": "node ./src/binance-dashboard-server.js",
+    "dashboard": "node ./src/dashboard-server.js",
+    "dashboard:x": "powershell -NoProfile -Command \"$env:DASHBOARD_CONFIG='./config/x-meme.example.json'; $env:DASHBOARD_PLATFORM='x'; npm run dashboard\"",
+    "test": "node --test",
+    "browsers": "playwright install chromium"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "dependencies": {
+    "nodemailer": "^8.0.7",
+    "playwright": "^1.54.2"
+  }
+}

@@ -1,0 +1,10 @@
+node_modules/
+.env
+.env.local
+data/runs/
+data/binance/
+config/binance-email.local.json
+storage/*.json
+storage/**/*.json
+tmp/
+npm-debug.log*

@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.local.json
+config.json
+*.session
+*.session-journal
+
+# Runtime data and browser/session state
+data/
+storage/
+tmp/
+output/
+dist/
+
+# Logs and temporary artifacts
+*.log
+*.out.log
+*.err.log
+npm-debug.log*
+tmp-*
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+
