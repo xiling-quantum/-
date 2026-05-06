@@ -6,6 +6,8 @@
   "description": "Independent local dashboard for collecting meme-coin related X posts from configured bloggers.",
   "scripts": {
     "start": "node ./src/server.js",
+    "start:meme": "powershell -NoProfile -Command \"$env:PORT='48932'; $env:APP_MODE='meme'; node ./src/server.js\"",
+    "start:analysis": "powershell -NoProfile -Command \"$env:PORT='48933'; $env:APP_MODE='analysis'; node ./src/server.js\"",
     "scrape:browser": "node ./src/browser-scrape.js",
     "scrape:heyi": "node ./src/browser-scrape.js --user heyibinance --max 20",
     "check": "node --check ./src/server.js && node --check ./src/browser-scrape.js"

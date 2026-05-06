@@ -12,6 +12,7 @@ const configPath = path.join(projectRoot, "config", "bloggers.json");
 const dataDir = path.join(projectRoot, "data");
 const latestPath = path.join(dataDir, "latest.json");
 const defaultPort = Number(process.env.PORT || 48931);
+const appMode = process.env.APP_MODE === "analysis" ? "analysis" : "meme";
 const X_API_BASE = "https://api.x.com/2";
 
 const USER_FIELDS = ["id", "name", "username", "description", "public_metrics", "profile_image_url", "verified"];
@@ -436,6 +437,8 @@ async function collectWithBrowser(requestBody) {
   const end = optionalDateInput(requestBody?.end, "结束");
   const memeOnly = Boolean(requestBody?.memeOnly);
   const memeMinScore = boundedNumber(requestBody?.memeMinScore, 2, 1, 8);
+  const analysisOnly = Boolean(requestBody?.analysisOnly);
+  const analysisMinScore = boundedNumber(requestBody?.analysisMinScore, 3, 1, 10);
   const scriptPath = path.join(projectRoot, "src", "browser-scrape.js");
 
   async function runOne(username) {
@@ -452,7 +455,11 @@ async function collectWithBrowser(requestBody) {
       "--memeOnly",
       String(memeOnly),
       "--memeMinScore",
-      String(memeMinScore)
+      String(memeMinScore),
+      "--analysisOnly",
+      String(analysisOnly),
+      "--analysisMinScore",
+      String(analysisMinScore)
     ];
     if (query) args.push("--query", query);
     if (start) args.push("--start", start);
@@ -524,7 +531,7 @@ async function collectWithBrowser(requestBody) {
   const payload = {
     username: usernames.length === 1 ? usernames[0] : "monitor",
     usernames,
-    filters: { query, memeOnly, memeMinScore, start: start || null, end: end || null },
+    filters: { query, memeOnly, memeMinScore, analysisOnly, analysisMinScore, start: start || null, end: end || null },
     generatedAt: new Date().toISOString(),
     totalPosts: posts.length,
     totalScanned: runs.reduce((sum, run) => sum + Number(run.payload?.totalScanned || 0), 0),
@@ -664,6 +671,18 @@ const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, `http://${request.headers.host}`);
 
   try {
+    if (request.method === "GET" && url.pathname === "/api/app-info") {
+      jsonResponse(response, 200, {
+        mode: appMode,
+        title: appMode === "analysis" ? "推特分析博文监控" : "推特秒级监控",
+        defaultPort,
+        defaultFilters: appMode === "analysis"
+          ? { memeOnly: false, memeMinScore: 2, analysisOnly: true, analysisMinScore: 3 }
+          : { memeOnly: true, memeMinScore: 2, analysisOnly: false, analysisMinScore: 3 }
+      });
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/config") {
       const config = await readConfig();
       jsonResponse(response, 200, {
@@ -887,6 +906,6 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(defaultPort, "127.0.0.1", () => {
-  console.log(`independent X meme dashboard: http://127.0.0.1:${defaultPort}`);
+  console.log(`independent X ${appMode} dashboard: http://127.0.0.1:${defaultPort}`);
   console.log(`project root: ${projectRoot}`);
 });

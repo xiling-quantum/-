@@ -84,6 +84,47 @@ function isMemeCoinPost(post, minScore) {
   return analysis.score >= minScore;
 }
 
+const ANALYSIS_SIGNALS = [
+  { pattern: /\b(thread|deep\s*dive|research|analysis|thesis|framework|breakdown)\b/i, weight: 3, reason: "英文分析词" },
+  { pattern: /\b(on-?chain|metrics?|data|chart|dashboard|volume|liquidity|holder|holders)\b/i, weight: 2, reason: "数据/链上" },
+  { pattern: /\b(because|therefore|however|risk|catalyst|narrative|market\s*structure)\b/i, weight: 2, reason: "推理结构" },
+  { pattern: /\b(alpha|strategy|watchlist|rotation|cycle|trend|setup)\b/i, weight: 1, reason: "交易/周期观点" },
+  { pattern: /(^|\n)\s*(1\.|2\.|3\.|①|②|③|一、|二、|三、)/, weight: 2, reason: "分点长文" },
+  { pattern: /分析|研报|研究|复盘|解读|观点|逻辑|原因|趋势|数据|图表|链上|持仓|流动性|交易量|市值|筹码|风险|催化剂|叙事/, weight: 2, reason: "中文分析词" }
+];
+
+function analysisPostScore(post) {
+  const text = String(post.text ?? "");
+  const reasons = [];
+  let score = 0;
+  for (const signal of ANALYSIS_SIGNALS) {
+    if (signal.pattern.test(text)) {
+      score += signal.weight;
+      reasons.push(signal.reason);
+    }
+  }
+  const textLength = [...text].length;
+  if (textLength >= 180) {
+    score += 2;
+    reasons.push("长文本");
+  } else if (textLength >= 100) {
+    score += 1;
+    reasons.push("中长文本");
+  }
+  if ((post.imageUrls?.length || 0) > 0 && /(chart|data|图|表|数据|链上|volume|liquidity|holder)/i.test(text)) {
+    score += 1;
+    reasons.push("配图+数据词");
+  }
+  return { score, reasons: [...new Set(reasons)] };
+}
+
+function isAnalysisPost(post, minScore) {
+  const analysis = analysisPostScore(post);
+  post.analysisScore = analysis.score;
+  post.analysisReasons = analysis.reasons;
+  return analysis.score >= minScore;
+}
+
 function dateMatches(value, startDate, endDate) {
   if (!startDate && !endDate) return true;
   if (!value) return false;
@@ -171,6 +212,8 @@ async function main() {
   const query = String(argValue("query", "") ?? "").trim();
   const memeOnly = argValue("memeOnly", "false") === "true";
   const memeMinScore = Number(argValue("memeMinScore", "2"));
+  const analysisOnly = argValue("analysisOnly", "false") === "true";
+  const analysisMinScore = Number(argValue("analysisMinScore", "3"));
   const startDate = parseDateArg("start");
   const endDate = parseDateArg("end");
 
@@ -212,6 +255,7 @@ async function main() {
       .filter((post) => textMatches(post.text, query))
       .filter((post) => dateMatches(post.publishedAt, startDate, endDate))
       .filter((post) => !memeOnly || isMemeCoinPost(post, memeMinScore))
+      .filter((post) => !analysisOnly || isAnalysisPost(post, analysisMinScore))
       .slice(0, maxPosts);
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const jsonPath = path.join(dataDir, `browser-${username}-${timestamp}.json`);
@@ -225,6 +269,8 @@ async function main() {
           query,
           memeOnly,
           memeMinScore,
+          analysisOnly,
+          analysisMinScore,
           start: startDate?.toISOString() ?? null,
           end: endDate?.toISOString() ?? null
         },
