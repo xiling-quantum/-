@@ -536,6 +536,13 @@
                 <label>AI 置信度
                   <input id="aiMinConfidence" type="number" min="0" max="1" step="0.05" value="0.65">
                 </label>
+                <label>AI 提供方
+                  <select id="aiProvider">
+                    <option value="openai">OpenAI</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="kimi">Kimi</option>
+                  </select>
+                </label>
                 <label>内容包含
                   <input id="query" placeholder="可留空">
                 </label>
@@ -733,6 +740,7 @@
               ${post.aiClassification ? `
                 <div class="tweet-badges">
                   <span class="tweet-badge">AI ${escapeHtml(post.aiClassification.label)}</span>
+                  <span class="tweet-badge">${escapeHtml(post.aiProvider || "")} ${escapeHtml(post.aiModel || "")}</span>
                   <span class="tweet-badge">置信度 ${escapeHtml(post.aiClassification.confidence)}</span>
                   <span class="tweet-badge">${escapeHtml(post.aiClassification.reason)}</span>
                 </div>
@@ -820,6 +828,7 @@
             analysisMinScore: Number(document.getElementById("analysisMinScore").value),
             todayOnly: document.getElementById("todayOnly").checked,
             aiClassify: document.getElementById("aiClassify").checked,
+            aiProvider: document.getElementById("aiProvider").value,
             aiMode: document.getElementById("memeOnly").checked && !document.getElementById("analysisOnly").checked ? "meme" : "analysis",
             aiMinConfidence: Number(document.getElementById("aiMinConfidence").value)
           })
@@ -848,6 +857,7 @@
           analysisMinScore: Number(document.getElementById("analysisMinScore").value),
           todayOnly: document.getElementById("todayOnly").checked,
           aiClassify: document.getElementById("aiClassify").checked,
+          aiProvider: document.getElementById("aiProvider").value,
           aiMode: document.getElementById("memeOnly").checked && !document.getElementById("analysisOnly").checked ? "meme" : "analysis",
           aiMinConfidence: Number(document.getElementById("aiMinConfidence").value)
         };

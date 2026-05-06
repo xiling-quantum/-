@@ -465,6 +465,7 @@ async function collectWithBrowser(requestBody) {
   const articleTimeoutMs = boundedNumber(requestBody?.articleTimeoutMs, 20_000, 5_000, 60_000);
   const retries = boundedNumber(requestBody?.retries, 1, 0, 3);
   const aiClassify = Boolean(requestBody?.aiClassify);
+  const aiProvider = ["openai", "deepseek", "kimi"].includes(requestBody?.aiProvider) ? requestBody.aiProvider : "openai";
   const aiMode = requestBody?.aiMode === "meme" ? "meme" : "analysis";
   const aiMinConfidence = Math.max(0, Math.min(1, Number(requestBody?.aiMinConfidence ?? 0.65)));
   const scriptPath = path.join(projectRoot, "src", "browser-scrape.js");
@@ -496,6 +497,8 @@ async function collectWithBrowser(requestBody) {
       String(retries),
       "--aiClassify",
       String(aiClassify),
+      "--aiProvider",
+      aiProvider,
       "--aiMode",
       aiMode,
       "--aiMinConfidence",
@@ -571,7 +574,7 @@ async function collectWithBrowser(requestBody) {
   const payload = {
     username: usernames.length === 1 ? usernames[0] : "monitor",
     usernames,
-    filters: { query, memeOnly, memeMinScore, analysisOnly, analysisMinScore, todayOnly, articleTimeoutMs, retries, aiClassify, aiMode, aiMinConfidence, start: start || null, end: end || null },
+    filters: { query, memeOnly, memeMinScore, analysisOnly, analysisMinScore, todayOnly, articleTimeoutMs, retries, aiClassify, aiProvider, aiMode, aiMinConfidence, start: start || null, end: end || null },
     generatedAt: new Date().toISOString(),
     totalPosts: posts.length,
     totalScanned: runs.reduce((sum, run) => sum + Number(run.payload?.totalScanned || 0), 0),

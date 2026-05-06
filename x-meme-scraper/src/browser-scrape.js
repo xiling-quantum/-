@@ -158,77 +158,103 @@ function responseOutputText(body) {
     .join("");
 }
 
-async function classifyPostsWithAI(posts, mode, minConfidence) {
-  if (!posts.length) return posts;
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error("AI classification is enabled, but OPENAI_API_KEY is not set.");
+function aiProviderConfig(provider) {
+  if (provider === "deepseek") {
+    return {
+      provider,
+      apiKey: process.env.DEEPSEEK_API_KEY,
+      model: process.env.DEEPSEEK_MODEL || "deepseek-chat",
+      baseUrl: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
+      type: "chat"
+    };
   }
-  const model = process.env.OPENAI_MODEL || "gpt-5.2";
-  const criteria = mode === "meme"
-    ? "Return isMatch=true only for posts primarily about meme coins, new token launches, memecoin trading, contract/CA discovery, or concrete meme-token market discussion. Exclude ordinary exchange campaigns, generic BNB/BTC/ETH news, giveaways, and unrelated memes."
-    : "Return isMatch=true only for analytical crypto posts: reasoned market views, on-chain/data analysis, risk/catalyst discussion, thesis threads, long-form breakdowns, or research-style observations. Exclude short updates, greetings, giveaways, pure news headlines, ads, and generic announcements.";
+  if (provider === "kimi") {
+    return {
+      provider,
+      apiKey: process.env.KIMI_API_KEY,
+      model: process.env.KIMI_MODEL || "moonshot-v1-8k",
+      baseUrl: process.env.KIMI_BASE_URL || "https://api.moonshot.cn/v1",
+      type: "chat"
+    };
+  }
+  return {
+    provider: "openai",
+    apiKey: process.env.OPENAI_API_KEY,
+    model: process.env.OPENAI_MODEL || "gpt-5.2",
+    baseUrl: "https://api.openai.com/v1",
+    type: "responses"
+  };
+}
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
+function classificationSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["items"],
+    properties: {
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id", "isMatch", "confidence", "label", "reason"],
+          properties: {
+            id: { type: "string" },
+            isMatch: { type: "boolean" },
+            confidence: { type: "number" },
+            label: { type: "string", enum: ["meme_coin", "analysis", "other"] },
+            reason: { type: "string" }
+          }
+        }
+      }
+    }
+  };
+}
+
+function classificationMessages(mode, posts, criteria) {
+  return [
+    {
+      role: "system",
+      content: `You are classifying X posts for a crypto monitoring dashboard. ${criteria} Be conservative. Return only valid JSON matching the requested schema.`
+    },
+    {
+      role: "user",
+      content: JSON.stringify({
+        mode,
+        posts: posts.map((post) => ({
+          id: post.id,
+          authorHandle: post.authorHandle,
+          publishedAt: post.publishedAt,
+          text: post.text,
+          hasImages: Boolean(post.imageUrls?.length),
+          ruleScores: {
+            memeScore: post.memeScore ?? 0,
+            analysisScore: post.analysisScore ?? 0,
+            memeReasons: post.memeReasons ?? [],
+            analysisReasons: post.analysisReasons ?? []
+          }
+        }))
+      })
+    }
+  ];
+}
+
+async function classifyWithOpenAIResponses(config, messages) {
+  const response = await fetch(`${config.baseUrl}/responses`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${config.apiKey}`,
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      model,
-      input: [
-        {
-          role: "system",
-          content: `You are classifying X posts for a crypto monitoring dashboard. ${criteria} Be conservative.`
-        },
-        {
-          role: "user",
-          content: JSON.stringify({
-            mode,
-            posts: posts.map((post) => ({
-              id: post.id,
-              authorHandle: post.authorHandle,
-              publishedAt: post.publishedAt,
-              text: post.text,
-              hasImages: Boolean(post.imageUrls?.length),
-              ruleScores: {
-                memeScore: post.memeScore ?? 0,
-                analysisScore: post.analysisScore ?? 0,
-                memeReasons: post.memeReasons ?? [],
-                analysisReasons: post.analysisReasons ?? []
-              }
-            }))
-          })
-        }
-      ],
+      model: config.model,
+      input: messages,
       text: {
         format: {
           type: "json_schema",
           name: "post_classification",
           strict: true,
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            required: ["items"],
-            properties: {
-              items: {
-                type: "array",
-                items: {
-                  type: "object",
-                  additionalProperties: false,
-                  required: ["id", "isMatch", "confidence", "label", "reason"],
-                  properties: {
-                    id: { type: "string" },
-                    isMatch: { type: "boolean" },
-                    confidence: { type: "number" },
-                    label: { type: "string", enum: ["meme_coin", "analysis", "other"] },
-                    reason: { type: "string" }
-                  }
-                }
-              }
-            }
-          }
+          schema: classificationSchema()
         }
       }
     })
@@ -236,9 +262,48 @@ async function classifyPostsWithAI(posts, mode, minConfidence) {
 
   const body = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(`OpenAI API ${response.status}: ${body?.error?.message || response.statusText}`);
+    throw new Error(`${config.provider} API ${response.status}: ${body?.error?.message || response.statusText}`);
   }
-  const parsed = JSON.parse(responseOutputText(body));
+  return JSON.parse(responseOutputText(body));
+}
+
+async function classifyWithChatCompletions(config, messages) {
+  const response = await fetch(`${config.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: config.model,
+      messages,
+      temperature: 0,
+      response_format: { type: "json_object" }
+    })
+  });
+
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(`${config.provider} API ${response.status}: ${body?.error?.message || response.statusText}`);
+  }
+  return JSON.parse(body?.choices?.[0]?.message?.content || "{}");
+}
+
+async function classifyPostsWithAI(posts, mode, minConfidence) {
+  if (!posts.length) return posts;
+  const provider = argValue("aiProvider", process.env.AI_PROVIDER || "openai");
+  const config = aiProviderConfig(provider);
+  if (!config.apiKey) {
+    throw new Error(`AI classification is enabled, but ${config.provider.toUpperCase()}_API_KEY is not set.`);
+  }
+  const criteria = mode === "meme"
+    ? "Return isMatch=true only for posts primarily about meme coins, new token launches, memecoin trading, contract/CA discovery, or concrete meme-token market discussion. Exclude ordinary exchange campaigns, generic BNB/BTC/ETH news, giveaways, and unrelated memes."
+    : "Return isMatch=true only for analytical crypto posts: reasoned market views, on-chain/data analysis, risk/catalyst discussion, thesis threads, long-form breakdowns, or research-style observations. Exclude short updates, greetings, giveaways, pure news headlines, ads, and generic announcements.";
+
+  const messages = classificationMessages(mode, posts, criteria);
+  const parsed = config.type === "responses"
+    ? await classifyWithOpenAIResponses(config, messages)
+    : await classifyWithChatCompletions(config, messages);
   const byId = new Map((parsed.items ?? []).map((item) => [String(item.id), item]));
   return posts
     .map((post) => {
@@ -246,7 +311,9 @@ async function classifyPostsWithAI(posts, mode, minConfidence) {
       return {
         ...post,
         aiClassification: result ?? null,
-        aiMode: mode
+        aiMode: mode,
+        aiProvider: config.provider,
+        aiModel: config.model
       };
     })
     .filter((post) => post.aiClassification?.isMatch && Number(post.aiClassification.confidence ?? 0) >= minConfidence);
@@ -368,6 +435,7 @@ async function main() {
   const analysisMinScore = Number(argValue("analysisMinScore", "3"));
   const todayOnly = argValue("todayOnly", "false") === "true";
   const aiClassify = argValue("aiClassify", "false") === "true";
+  const aiProvider = argValue("aiProvider", process.env.AI_PROVIDER || "openai");
   const aiMode = argValue("aiMode", analysisOnly ? "analysis" : "meme");
   const aiMinConfidence = Number(argValue("aiMinConfidence", "0.65"));
   const startDate = parseDateArg("start") || (todayOnly ? startOfLocalDay() : null);
@@ -439,6 +507,7 @@ async function main() {
           analysisMinScore,
           todayOnly,
           aiClassify,
+          aiProvider,
           aiMode,
           aiMinConfidence,
           start: startDate?.toISOString() ?? null,
