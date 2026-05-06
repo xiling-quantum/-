@@ -514,6 +514,7 @@
                   <label><input id="soundEnabled" type="checkbox" checked> 声音提醒</label>
                   <label><input id="memeOnly" type="checkbox" checked> 只抓 meme 币内容</label>
                   <label><input id="analysisOnly" type="checkbox"> 只抓分析类博文</label>
+                  <label><input id="todayOnly" type="checkbox"> 只抓今日最新</label>
                   <label><input id="headless" type="checkbox" checked> 无头模式</label>
                 </div>
               </div>
@@ -805,7 +806,8 @@
             memeOnly: document.getElementById("memeOnly").checked,
             memeMinScore: Number(document.getElementById("memeMinScore").value),
             analysisOnly: document.getElementById("analysisOnly").checked,
-            analysisMinScore: Number(document.getElementById("analysisMinScore").value)
+            analysisMinScore: Number(document.getElementById("analysisMinScore").value),
+            todayOnly: document.getElementById("todayOnly").checked
           })
         });
         const payload = await response.json();
@@ -829,7 +831,8 @@
           memeOnly: document.getElementById("memeOnly").checked,
           memeMinScore: Number(document.getElementById("memeMinScore").value),
           analysisOnly: document.getElementById("analysisOnly").checked,
-          analysisMinScore: Number(document.getElementById("analysisMinScore").value)
+          analysisMinScore: Number(document.getElementById("analysisMinScore").value),
+          todayOnly: document.getElementById("todayOnly").checked
         };
       }
 
@@ -841,6 +844,7 @@
         const defaults = appInfo.defaultFilters || {};
         document.getElementById("memeOnly").checked = Boolean(defaults.memeOnly);
         document.getElementById("analysisOnly").checked = Boolean(defaults.analysisOnly);
+        document.getElementById("todayOnly").checked = Boolean(defaults.todayOnly);
         document.getElementById("memeMinScore").value = String(defaults.memeMinScore ?? 2);
         document.getElementById("analysisMinScore").value = String(defaults.analysisMinScore ?? 3);
         if (appInfo.mode === "analysis") {

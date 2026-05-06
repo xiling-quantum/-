@@ -439,6 +439,7 @@ async function collectWithBrowser(requestBody) {
   const memeMinScore = boundedNumber(requestBody?.memeMinScore, 2, 1, 8);
   const analysisOnly = Boolean(requestBody?.analysisOnly);
   const analysisMinScore = boundedNumber(requestBody?.analysisMinScore, 3, 1, 10);
+  const todayOnly = Boolean(requestBody?.todayOnly);
   const scriptPath = path.join(projectRoot, "src", "browser-scrape.js");
 
   async function runOne(username) {
@@ -459,7 +460,9 @@ async function collectWithBrowser(requestBody) {
       "--analysisOnly",
       String(analysisOnly),
       "--analysisMinScore",
-      String(analysisMinScore)
+      String(analysisMinScore),
+      "--todayOnly",
+      String(todayOnly)
     ];
     if (query) args.push("--query", query);
     if (start) args.push("--start", start);
@@ -531,7 +534,7 @@ async function collectWithBrowser(requestBody) {
   const payload = {
     username: usernames.length === 1 ? usernames[0] : "monitor",
     usernames,
-    filters: { query, memeOnly, memeMinScore, analysisOnly, analysisMinScore, start: start || null, end: end || null },
+    filters: { query, memeOnly, memeMinScore, analysisOnly, analysisMinScore, todayOnly, start: start || null, end: end || null },
     generatedAt: new Date().toISOString(),
     totalPosts: posts.length,
     totalScanned: runs.reduce((sum, run) => sum + Number(run.payload?.totalScanned || 0), 0),
@@ -677,8 +680,8 @@ const server = http.createServer(async (request, response) => {
         title: appMode === "analysis" ? "推特分析博文监控" : "推特秒级监控",
         defaultPort,
         defaultFilters: appMode === "analysis"
-          ? { memeOnly: false, memeMinScore: 2, analysisOnly: true, analysisMinScore: 3 }
-          : { memeOnly: true, memeMinScore: 2, analysisOnly: false, analysisMinScore: 3 }
+          ? { memeOnly: false, memeMinScore: 2, analysisOnly: true, analysisMinScore: 3, todayOnly: true }
+          : { memeOnly: true, memeMinScore: 2, analysisOnly: false, analysisMinScore: 3, todayOnly: false }
       });
       return;
     }

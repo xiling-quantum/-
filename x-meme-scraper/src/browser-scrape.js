@@ -39,6 +39,12 @@ function parseDateArg(name) {
   return date;
 }
 
+function startOfLocalDay() {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
 function textMatches(text, query) {
   const trimmed = String(query ?? "").trim().toLowerCase();
   if (!trimmed) return true;
@@ -214,7 +220,8 @@ async function main() {
   const memeMinScore = Number(argValue("memeMinScore", "2"));
   const analysisOnly = argValue("analysisOnly", "false") === "true";
   const analysisMinScore = Number(argValue("analysisMinScore", "3"));
-  const startDate = parseDateArg("start");
+  const todayOnly = argValue("todayOnly", "false") === "true";
+  const startDate = parseDateArg("start") || (todayOnly ? startOfLocalDay() : null);
   const endDate = parseDateArg("end");
 
   if (!/^[A-Za-z0-9_]{1,15}$/.test(username)) {
@@ -271,6 +278,7 @@ async function main() {
           memeMinScore,
           analysisOnly,
           analysisMinScore,
+          todayOnly,
           start: startDate?.toISOString() ?? null,
           end: endDate?.toISOString() ?? null
         },
