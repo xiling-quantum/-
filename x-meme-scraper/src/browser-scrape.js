@@ -162,6 +162,29 @@ async function autoScroll(page, maxPosts, maxScrolls) {
   }
 }
 
+async function waitForTimeline(page, username, articleTimeoutMs, retries) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      if (attempt > 0) {
+        await page.reload({ waitUntil: "domcontentloaded", timeout: 45_000 });
+      }
+      await page.locator("article").first().waitFor({ timeout: articleTimeoutMs });
+      return;
+    } catch (error) {
+      lastError = error;
+      const pageText = await page.locator("body").innerText({ timeout: 3000 }).catch(() => "");
+      if (/log in|sign in|登录|登入/i.test(pageText)) {
+        throw new Error(`X requires login before @${username} timeline can be read. Run headed mode once and log in.`);
+      }
+      if (/something went wrong|try again|rate limit|temporarily unavailable/i.test(pageText)) {
+        throw new Error(`X did not render @${username} timeline: ${pageText.replace(/\s+/g, " ").slice(0, 160)}`);
+      }
+    }
+  }
+  throw new Error(`Timed out waiting for @${username} timeline articles after ${(retries + 1) * articleTimeoutMs}ms. Last error: ${lastError?.message || "unknown"}`);
+}
+
 async function extractPosts(page, username, maxPosts) {
   return page.locator("article").evaluateAll(
     (articles, args) => {
@@ -215,6 +238,8 @@ async function main() {
   const maxPosts = Number(argValue("max", "20"));
   const maxScrolls = Number(argValue("scrolls", "12"));
   const headless = argValue("headless", "false") === "true";
+  const articleTimeoutMs = Number(argValue("articleTimeoutMs", "20000"));
+  const retries = Number(argValue("retries", "1"));
   const query = String(argValue("query", "") ?? "").trim();
   const memeOnly = argValue("memeOnly", "false") === "true";
   const memeMinScore = Number(argValue("memeMinScore", "2"));
@@ -240,7 +265,7 @@ async function main() {
 
   try {
     const page = context.pages()[0] ?? (await context.newPage());
-    await page.goto(`https://x.com/${username}`, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    await page.goto(`https://x.com/${username}`, { waitUntil: "domcontentloaded", timeout: 45_000 });
 
     const loginVisible = await page
       .locator('input[name="text"], input[name="password"], a[href="/login"]')
@@ -254,7 +279,7 @@ async function main() {
       await page.locator("article").first().waitFor({ timeout: 300_000 });
     }
 
-    await page.locator("article").first().waitFor({ timeout: 45_000 });
+    await waitForTimeline(page, username, articleTimeoutMs, retries);
     await autoScroll(page, maxPosts, maxScrolls);
 
     const rawPosts = await extractPosts(page, username, Math.max(maxPosts, maxPosts * 3));
