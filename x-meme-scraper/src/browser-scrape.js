@@ -131,6 +131,127 @@ function isAnalysisPost(post, minScore) {
   return analysis.score >= minScore;
 }
 
+function annotateScores(post) {
+  const meme = memeAnalysis(post);
+  post.memeScore = meme.score;
+  post.memeReasons = meme.reasons;
+  const analysis = analysisPostScore(post);
+  post.analysisScore = analysis.score;
+  post.analysisReasons = analysis.reasons;
+  return post;
+}
+
+function aiCandidate(post, mode) {
+  annotateScores(post);
+  const textLength = [...String(post.text ?? "")].length;
+  if (mode === "meme") {
+    return post.memeScore >= 1 || /\$[A-Z][A-Z0-9_]{1,11}\b/.test(post.text || "");
+  }
+  return post.analysisScore >= 1 || textLength >= 80;
+}
+
+function responseOutputText(body) {
+  if (typeof body?.output_text === "string") return body.output_text;
+  return (body?.output ?? [])
+    .flatMap((item) => item.content ?? [])
+    .map((content) => content.text ?? "")
+    .join("");
+}
+
+async function classifyPostsWithAI(posts, mode, minConfidence) {
+  if (!posts.length) return posts;
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("AI classification is enabled, but OPENAI_API_KEY is not set.");
+  }
+  const model = process.env.OPENAI_MODEL || "gpt-5.2";
+  const criteria = mode === "meme"
+    ? "Return isMatch=true only for posts primarily about meme coins, new token launches, memecoin trading, contract/CA discovery, or concrete meme-token market discussion. Exclude ordinary exchange campaigns, generic BNB/BTC/ETH news, giveaways, and unrelated memes."
+    : "Return isMatch=true only for analytical crypto posts: reasoned market views, on-chain/data analysis, risk/catalyst discussion, thesis threads, long-form breakdowns, or research-style observations. Exclude short updates, greetings, giveaways, pure news headlines, ads, and generic announcements.";
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model,
+      input: [
+        {
+          role: "system",
+          content: `You are classifying X posts for a crypto monitoring dashboard. ${criteria} Be conservative.`
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            mode,
+            posts: posts.map((post) => ({
+              id: post.id,
+              authorHandle: post.authorHandle,
+              publishedAt: post.publishedAt,
+              text: post.text,
+              hasImages: Boolean(post.imageUrls?.length),
+              ruleScores: {
+                memeScore: post.memeScore ?? 0,
+                analysisScore: post.analysisScore ?? 0,
+                memeReasons: post.memeReasons ?? [],
+                analysisReasons: post.analysisReasons ?? []
+              }
+            }))
+          })
+        }
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "post_classification",
+          strict: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            required: ["items"],
+            properties: {
+              items: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["id", "isMatch", "confidence", "label", "reason"],
+                  properties: {
+                    id: { type: "string" },
+                    isMatch: { type: "boolean" },
+                    confidence: { type: "number" },
+                    label: { type: "string", enum: ["meme_coin", "analysis", "other"] },
+                    reason: { type: "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+  });
+
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(`OpenAI API ${response.status}: ${body?.error?.message || response.statusText}`);
+  }
+  const parsed = JSON.parse(responseOutputText(body));
+  const byId = new Map((parsed.items ?? []).map((item) => [String(item.id), item]));
+  return posts
+    .map((post) => {
+      const result = byId.get(String(post.id));
+      return {
+        ...post,
+        aiClassification: result ?? null,
+        aiMode: mode
+      };
+    })
+    .filter((post) => post.aiClassification?.isMatch && Number(post.aiClassification.confidence ?? 0) >= minConfidence);
+}
+
 function dateMatches(value, startDate, endDate) {
   if (!startDate && !endDate) return true;
   if (!value) return false;
@@ -246,6 +367,9 @@ async function main() {
   const analysisOnly = argValue("analysisOnly", "false") === "true";
   const analysisMinScore = Number(argValue("analysisMinScore", "3"));
   const todayOnly = argValue("todayOnly", "false") === "true";
+  const aiClassify = argValue("aiClassify", "false") === "true";
+  const aiMode = argValue("aiMode", analysisOnly ? "analysis" : "meme");
+  const aiMinConfidence = Number(argValue("aiMinConfidence", "0.65"));
   const startDate = parseDateArg("start") || (todayOnly ? startOfLocalDay() : null);
   const endDate = parseDateArg("end");
 
@@ -283,12 +407,22 @@ async function main() {
     await autoScroll(page, maxPosts, maxScrolls);
 
     const rawPosts = await extractPosts(page, username, Math.max(maxPosts, maxPosts * 3));
-    const posts = rawPosts
+    let posts = rawPosts
       .filter((post) => textMatches(post.text, query))
       .filter((post) => dateMatches(post.publishedAt, startDate, endDate))
-      .filter((post) => !memeOnly || isMemeCoinPost(post, memeMinScore))
-      .filter((post) => !analysisOnly || isAnalysisPost(post, analysisMinScore))
-      .slice(0, maxPosts);
+      .map((post) => annotateScores(post));
+
+    if (aiClassify) {
+      const mode = aiMode === "meme" ? "meme" : "analysis";
+      const candidates = posts.filter((post) => aiCandidate(post, mode)).slice(0, Math.max(maxPosts, maxPosts * 2));
+      posts = await classifyPostsWithAI(candidates, mode, aiMinConfidence);
+    } else {
+      posts = posts
+        .filter((post) => !memeOnly || isMemeCoinPost(post, memeMinScore))
+        .filter((post) => !analysisOnly || isAnalysisPost(post, analysisMinScore));
+    }
+
+    posts = posts.slice(0, maxPosts);
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const jsonPath = path.join(dataDir, `browser-${username}-${timestamp}.json`);
     const csvPath = path.join(dataDir, `browser-${username}-${timestamp}.csv`);
@@ -304,6 +438,9 @@ async function main() {
           analysisOnly,
           analysisMinScore,
           todayOnly,
+          aiClassify,
+          aiMode,
+          aiMinConfidence,
           start: startDate?.toISOString() ?? null,
           end: endDate?.toISOString() ?? null
         },

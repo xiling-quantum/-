@@ -514,6 +514,7 @@
                   <label><input id="soundEnabled" type="checkbox" checked> 声音提醒</label>
                   <label><input id="memeOnly" type="checkbox" checked> 只抓 meme 币内容</label>
                   <label><input id="analysisOnly" type="checkbox"> 只抓分析类博文</label>
+                  <label><input id="aiClassify" type="checkbox"> AI 二次判断</label>
                   <label><input id="todayOnly" type="checkbox"> 只抓今日最新</label>
                   <label><input id="headless" type="checkbox" checked> 无头模式</label>
                 </div>
@@ -531,6 +532,9 @@
                 </label>
                 <label>分析分数
                   <input id="analysisMinScore" type="number" min="1" max="10" value="3">
+                </label>
+                <label>AI 置信度
+                  <input id="aiMinConfidence" type="number" min="0" max="1" step="0.05" value="0.65">
                 </label>
                 <label>内容包含
                   <input id="query" placeholder="可留空">
@@ -726,6 +730,13 @@
                   ${(post.analysisReasons || []).slice(0, 4).map((reason) => `<span class="tweet-badge">${escapeHtml(reason)}</span>`).join("")}
                 </div>
               ` : ""}
+              ${post.aiClassification ? `
+                <div class="tweet-badges">
+                  <span class="tweet-badge">AI ${escapeHtml(post.aiClassification.label)}</span>
+                  <span class="tweet-badge">置信度 ${escapeHtml(post.aiClassification.confidence)}</span>
+                  <span class="tweet-badge">${escapeHtml(post.aiClassification.reason)}</span>
+                </div>
+              ` : ""}
               ${(post.imageUrls || []).length ? `
                 <div class="tweet-media">
                   ${(post.imageUrls || []).slice(0, 4).map((src) => `<img src="${escapeHtml(src)}" alt="">`).join("")}
@@ -807,7 +818,10 @@
             memeMinScore: Number(document.getElementById("memeMinScore").value),
             analysisOnly: document.getElementById("analysisOnly").checked,
             analysisMinScore: Number(document.getElementById("analysisMinScore").value),
-            todayOnly: document.getElementById("todayOnly").checked
+            todayOnly: document.getElementById("todayOnly").checked,
+            aiClassify: document.getElementById("aiClassify").checked,
+            aiMode: document.getElementById("memeOnly").checked && !document.getElementById("analysisOnly").checked ? "meme" : "analysis",
+            aiMinConfidence: Number(document.getElementById("aiMinConfidence").value)
           })
         });
         const payload = await response.json();
@@ -832,7 +846,10 @@
           memeMinScore: Number(document.getElementById("memeMinScore").value),
           analysisOnly: document.getElementById("analysisOnly").checked,
           analysisMinScore: Number(document.getElementById("analysisMinScore").value),
-          todayOnly: document.getElementById("todayOnly").checked
+          todayOnly: document.getElementById("todayOnly").checked,
+          aiClassify: document.getElementById("aiClassify").checked,
+          aiMode: document.getElementById("memeOnly").checked && !document.getElementById("analysisOnly").checked ? "meme" : "analysis",
+          aiMinConfidence: Number(document.getElementById("aiMinConfidence").value)
         };
       }
 

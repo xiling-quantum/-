@@ -464,6 +464,9 @@ async function collectWithBrowser(requestBody) {
   const todayOnly = Boolean(requestBody?.todayOnly);
   const articleTimeoutMs = boundedNumber(requestBody?.articleTimeoutMs, 20_000, 5_000, 60_000);
   const retries = boundedNumber(requestBody?.retries, 1, 0, 3);
+  const aiClassify = Boolean(requestBody?.aiClassify);
+  const aiMode = requestBody?.aiMode === "meme" ? "meme" : "analysis";
+  const aiMinConfidence = Math.max(0, Math.min(1, Number(requestBody?.aiMinConfidence ?? 0.65)));
   const scriptPath = path.join(projectRoot, "src", "browser-scrape.js");
 
   async function runOne(username) {
@@ -490,7 +493,13 @@ async function collectWithBrowser(requestBody) {
       "--articleTimeoutMs",
       String(articleTimeoutMs),
       "--retries",
-      String(retries)
+      String(retries),
+      "--aiClassify",
+      String(aiClassify),
+      "--aiMode",
+      aiMode,
+      "--aiMinConfidence",
+      String(aiMinConfidence)
     ];
     if (query) args.push("--query", query);
     if (start) args.push("--start", start);
@@ -562,7 +571,7 @@ async function collectWithBrowser(requestBody) {
   const payload = {
     username: usernames.length === 1 ? usernames[0] : "monitor",
     usernames,
-    filters: { query, memeOnly, memeMinScore, analysisOnly, analysisMinScore, todayOnly, articleTimeoutMs, retries, start: start || null, end: end || null },
+    filters: { query, memeOnly, memeMinScore, analysisOnly, analysisMinScore, todayOnly, articleTimeoutMs, retries, aiClassify, aiMode, aiMinConfidence, start: start || null, end: end || null },
     generatedAt: new Date().toISOString(),
     totalPosts: posts.length,
     totalScanned: runs.reduce((sum, run) => sum + Number(run.payload?.totalScanned || 0), 0),
