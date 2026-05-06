@@ -11,6 +11,8 @@ const publicDir = path.join(projectRoot, "public");
 const configPath = path.join(projectRoot, "config", "bloggers.json");
 const dataDir = path.join(projectRoot, "data");
 const latestPath = path.join(dataDir, "latest.json");
+const latestBrowserPath = path.join(dataDir, "browser-latest.json");
+const latestBrowserHitPath = path.join(dataDir, "browser-latest-hit.json");
 const defaultPort = Number(process.env.PORT || 48931);
 const appMode = process.env.APP_MODE === "analysis" ? "analysis" : "meme";
 const X_API_BASE = "https://api.x.com/2";
@@ -396,7 +398,7 @@ async function listBrowserRuns() {
   const files = await fs.readdir(dataDir);
   const runs = [];
   for (const file of files) {
-    if (!/^browser-(?:[A-Za-z0-9_]+|monitor)-.+\.json$/.test(file)) continue;
+    if (!/^browser-monitor-.+\.json$/.test(file)) continue;
     const filePath = path.join(dataDir, file);
     const stat = await fs.stat(filePath);
     runs.push({
@@ -410,6 +412,26 @@ async function listBrowserRuns() {
 }
 
 async function readLatestBrowserRun() {
+  try {
+    const latestHit = JSON.parse(await fs.readFile(latestBrowserHitPath, "utf8"));
+    return {
+      file: path.basename(latestBrowserHitPath),
+      path: latestBrowserHitPath,
+      latestRun: JSON.parse(await fs.readFile(latestBrowserPath, "utf8")).generatedAt,
+      ...(latestHit)
+    };
+  } catch {
+    // Fall through to latest run.
+  }
+  try {
+    return {
+      file: path.basename(latestBrowserPath),
+      path: latestBrowserPath,
+      ...(JSON.parse(await fs.readFile(latestBrowserPath, "utf8")))
+    };
+  } catch {
+    // Fall through to historical monitor files.
+  }
   const [latest] = await listBrowserRuns();
   if (!latest) {
     return {
@@ -547,6 +569,10 @@ async function collectWithBrowser(requestBody) {
     posts
   };
   await fs.writeFile(outputFile, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  await fs.writeFile(latestBrowserPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  if (posts.length > 0) {
+    await fs.writeFile(latestBrowserHitPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  }
   const csvRows = [
     ["id", "url", "authorHandle", "publishedAt", "text", "imageUrls", "videoPosters", "scrapedAt"].map(csvCell).join(","),
     ...posts.map((post) =>
