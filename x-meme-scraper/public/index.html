@@ -276,7 +276,7 @@
 
       .filter-panel {
         display: grid;
-        grid-template-columns: 130px 110px 110px 110px 140px 170px 170px 1fr auto;
+        grid-template-columns: 130px 110px 110px 110px 170px 170px 1fr auto;
         gap: 10px;
         margin-bottom: 16px;
         align-items: end;
@@ -513,9 +513,7 @@
                 <div class="checks">
                   <label><input id="soundEnabled" type="checkbox" checked> 声音提醒</label>
                   <label><input id="memeOnly" type="checkbox" checked> 只抓 meme 币内容</label>
-                  <label><input id="analysisOnly" type="checkbox"> 只抓分析类博文</label>
                   <label><input id="aiClassify" type="checkbox"> AI 二次判断</label>
-                  <label><input id="todayOnly" type="checkbox"> 只抓今日最新</label>
                   <label><input id="headless" type="checkbox" checked> 无头模式</label>
                 </div>
               </div>
@@ -532,9 +530,6 @@
                 </label>
                 <label>meme 分数
                   <input id="memeMinScore" type="number" min="1" max="8" value="2">
-                </label>
-                <label>分析分数
-                  <input id="analysisMinScore" type="number" min="1" max="10" value="3">
                 </label>
                 <label>AI 置信度
                   <input id="aiMinConfidence" type="number" min="0" max="1" step="0.05" value="0.65">
@@ -828,12 +823,12 @@
             headless: document.getElementById("headless").checked,
             memeOnly: document.getElementById("memeOnly").checked,
             memeMinScore: Number(document.getElementById("memeMinScore").value),
-            analysisOnly: document.getElementById("analysisOnly").checked,
-            analysisMinScore: Number(document.getElementById("analysisMinScore").value),
-            todayOnly: document.getElementById("todayOnly").checked,
+            analysisOnly: false,
+            analysisMinScore: 3,
+            todayOnly: true,
             aiClassify: document.getElementById("aiClassify").checked,
             aiProvider: document.getElementById("aiProvider").value,
-            aiMode: document.getElementById("memeOnly").checked && !document.getElementById("analysisOnly").checked ? "meme" : "analysis",
+            aiMode: "meme",
             aiMinConfidence: Number(document.getElementById("aiMinConfidence").value)
           })
         });
@@ -858,12 +853,12 @@
           headless: document.getElementById("headless").checked,
           memeOnly: document.getElementById("memeOnly").checked,
           memeMinScore: Number(document.getElementById("memeMinScore").value),
-          analysisOnly: document.getElementById("analysisOnly").checked,
-          analysisMinScore: Number(document.getElementById("analysisMinScore").value),
-          todayOnly: document.getElementById("todayOnly").checked,
+          analysisOnly: false,
+          analysisMinScore: 3,
+          todayOnly: true,
           aiClassify: document.getElementById("aiClassify").checked,
           aiProvider: document.getElementById("aiProvider").value,
-          aiMode: document.getElementById("memeOnly").checked && !document.getElementById("analysisOnly").checked ? "meme" : "analysis",
+          aiMode: "meme",
           aiMinConfidence: Number(document.getElementById("aiMinConfidence").value)
         };
       }
@@ -875,10 +870,7 @@
         appTitle.textContent = appInfo.title || "推特秒级监控";
         const defaults = appInfo.defaultFilters || {};
         document.getElementById("memeOnly").checked = Boolean(defaults.memeOnly);
-        document.getElementById("analysisOnly").checked = Boolean(defaults.analysisOnly);
-        document.getElementById("todayOnly").checked = Boolean(defaults.todayOnly);
         document.getElementById("memeMinScore").value = String(defaults.memeMinScore ?? 2);
-        document.getElementById("analysisMinScore").value = String(defaults.analysisMinScore ?? 3);
         if (appInfo.mode === "analysis") {
           document.getElementById("query").placeholder = "例如 链上、数据、分析、观点、thread，可留空";
         }

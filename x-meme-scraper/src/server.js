@@ -543,13 +543,13 @@ async function collectWithBrowser(requestBody) {
   const maxScrolls = boundedNumber(requestBody?.maxScrolls, 10, 1, 50);
   const headless = requestBody?.headless !== false;
   const query = String(requestBody?.query ?? "").trim();
-  const start = optionalDateInput(requestBody?.start, "开始");
-  const end = optionalDateInput(requestBody?.end, "结束");
+  const start = "";
+  const end = "";
   const memeOnly = Boolean(requestBody?.memeOnly);
   const memeMinScore = boundedNumber(requestBody?.memeMinScore, 2, 1, 8);
-  const analysisOnly = Boolean(requestBody?.analysisOnly);
-  const analysisMinScore = boundedNumber(requestBody?.analysisMinScore, 3, 1, 10);
-  const todayOnly = Boolean(requestBody?.todayOnly);
+  const analysisOnly = false;
+  const analysisMinScore = 3;
+  const todayOnly = true;
   const articleTimeoutMs = boundedNumber(requestBody?.articleTimeoutMs, 20_000, 5_000, 60_000);
   const retries = boundedNumber(requestBody?.retries, 1, 0, 3);
   const concurrency = boundedNumber(requestBody?.concurrency, 3, 1, 5);
@@ -808,7 +808,7 @@ const server = http.createServer(async (request, response) => {
         defaultPort,
         defaultFilters: appMode === "analysis"
           ? { memeOnly: false, memeMinScore: 2, analysisOnly: true, analysisMinScore: 3, todayOnly: true }
-          : { memeOnly: true, memeMinScore: 2, analysisOnly: false, analysisMinScore: 3, todayOnly: false }
+          : { memeOnly: true, memeMinScore: 2, analysisOnly: false, analysisMinScore: 3, todayOnly: true }
       });
       return;
     }
