@@ -13,6 +13,7 @@ const dataDir = path.join(projectRoot, "data");
 const latestPath = path.join(dataDir, "latest.json");
 const latestBrowserPath = path.join(dataDir, "browser-latest.json");
 const latestBrowserHitPath = path.join(dataDir, "browser-latest-hit.json");
+const latestTelegramPath = path.join(dataDir, "telegram-latest.json");
 const defaultPort = Number(process.env.PORT || 48931);
 const appMode = process.env.APP_MODE === "analysis" ? "analysis" : "meme";
 const X_API_BASE = "https://api.x.com/2";
@@ -45,6 +46,18 @@ let lastRun = {
 
 let activeBrowserRun = null;
 let lastBrowserRun = {
+  status: "idle",
+  startedAt: null,
+  finishedAt: null,
+  outputFile: null,
+  csvFile: null,
+  totalPosts: 0,
+  error: null,
+  stdout: "",
+  stderr: ""
+};
+let activeTelegramRun = null;
+let lastTelegramRun = {
   status: "idle",
   startedAt: null,
   finishedAt: null,
@@ -448,6 +461,81 @@ async function readLatestBrowserRun() {
   };
 }
 
+async function readLatestTelegramRun() {
+  try {
+    return JSON.parse(await fs.readFile(latestTelegramPath, "utf8"));
+  } catch {
+    return {
+      source: "telegram",
+      generatedAt: null,
+      totalPosts: 0,
+      accounts: [],
+      errors: [],
+      posts: []
+    };
+  }
+}
+
+async function collectWithTelegram(requestBody) {
+  const groups = asArray(requestBody?.groups).map((item) => String(item).trim()).filter(Boolean);
+  const maxMessages = boundedNumber(requestBody?.maxMessages, 50, 1, 200);
+  const query = String(requestBody?.query ?? "").trim();
+  const memeOnly = Boolean(requestBody?.memeOnly);
+  const memeMinScore = boundedNumber(requestBody?.memeMinScore, 2, 1, 8);
+  const scriptPath = path.join(projectRoot, "src", "telegram-scrape.js");
+  const args = [
+    scriptPath,
+    "--max",
+    String(maxMessages),
+    "--memeOnly",
+    String(memeOnly),
+    "--memeMinScore",
+    String(memeMinScore)
+  ];
+  if (groups.length) args.push("--groups", groups.join(","));
+  if (query) args.push("--query", query);
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, {
+      cwd: projectRoot,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env
+    });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("error", reject);
+    child.on("close", async (code) => {
+      try {
+        if (code !== 0) {
+          throw new Error(stderr.trim() || stdout.trim() || `telegram scraper exited with ${code}`);
+        }
+        const jsonPath = stdout.match(/JSON:\s*(.+\.json)/)?.[1]?.trim();
+        const csvPath = stdout.match(/CSV:\s*(.+\.csv)/)?.[1]?.trim();
+        const payload = jsonPath ? JSON.parse(await fs.readFile(jsonPath, "utf8")) : await readLatestTelegramRun();
+        resolve({
+          ...payload,
+          outputFile: jsonPath || null,
+          csvFile: csvPath || null,
+          stdout,
+          stderr
+        });
+      } catch (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+      }
+    });
+  });
+}
+
 async function collectWithBrowser(requestBody) {
   const usernames = uniqueUsernames(requestBody?.usernames?.length ? requestBody.usernames : requestBody?.username);
   if (!usernames.length) usernames.push("heyibinance");
@@ -464,17 +552,18 @@ async function collectWithBrowser(requestBody) {
   const todayOnly = Boolean(requestBody?.todayOnly);
   const articleTimeoutMs = boundedNumber(requestBody?.articleTimeoutMs, 20_000, 5_000, 60_000);
   const retries = boundedNumber(requestBody?.retries, 1, 0, 3);
+  const concurrency = boundedNumber(requestBody?.concurrency, 3, 1, 5);
   const aiClassify = Boolean(requestBody?.aiClassify);
   const aiProvider = ["openai", "deepseek", "kimi"].includes(requestBody?.aiProvider) ? requestBody.aiProvider : "openai";
   const aiMode = requestBody?.aiMode === "meme" ? "meme" : "analysis";
   const aiMinConfidence = Math.max(0, Math.min(1, Number(requestBody?.aiMinConfidence ?? 0.65)));
   const scriptPath = path.join(projectRoot, "src", "browser-scrape.js");
 
-  async function runOne(username) {
+  async function runBrowserBatch() {
     const args = [
       scriptPath,
-      "--user",
-      username,
+      "--users",
+      usernames.join(","),
       "--max",
       String(maxPosts),
       "--scrolls",
@@ -495,6 +584,8 @@ async function collectWithBrowser(requestBody) {
       String(articleTimeoutMs),
       "--retries",
       String(retries),
+      "--concurrency",
+      String(concurrency),
       "--aiClassify",
       String(aiClassify),
       "--aiProvider",
@@ -533,7 +624,6 @@ async function collectWithBrowser(requestBody) {
           const csvPath = stdout.match(/CSV:\s*(.+\.csv)/)?.[1]?.trim();
           const payload = jsonPath ? JSON.parse(await fs.readFile(jsonPath, "utf8")) : null;
           resolve({
-            username,
             payload,
             outputFile: jsonPath || null,
             csvFile: csvPath || null,
@@ -543,30 +633,27 @@ async function collectWithBrowser(requestBody) {
         } catch (error) {
           error.stdout = stdout;
           error.stderr = stderr;
-          error.username = username;
           reject(error);
         }
       });
     });
   }
 
-  const runs = [];
-  const errors = [];
-  for (const username of usernames) {
-    try {
-      runs.push(await runOne(username));
-    } catch (error) {
-      errors.push({
-        username,
-        message: error.message,
-        stdout: error.stdout || "",
-        stderr: error.stderr || ""
-      });
-    }
+  let batchRun = null;
+  let errors = [];
+  try {
+    batchRun = await runBrowserBatch();
+    errors = batchRun.payload?.errors ?? [];
+  } catch (error) {
+    errors = [{
+      username: "monitor",
+      message: error.message,
+      stdout: error.stdout || "",
+      stderr: error.stderr || ""
+    }];
   }
 
-  const posts = runs
-    .flatMap((run) => run.payload?.posts ?? [])
+  const posts = (batchRun?.payload?.posts ?? [])
     .sort((left, right) => String(right.publishedAt || "").localeCompare(String(left.publishedAt || "")));
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const outputFile = path.join(dataDir, `browser-monitor-${timestamp}.json`);
@@ -574,15 +661,11 @@ async function collectWithBrowser(requestBody) {
   const payload = {
     username: usernames.length === 1 ? usernames[0] : "monitor",
     usernames,
-    filters: { query, memeOnly, memeMinScore, analysisOnly, analysisMinScore, todayOnly, articleTimeoutMs, retries, aiClassify, aiProvider, aiMode, aiMinConfidence, start: start || null, end: end || null },
+    filters: { query, memeOnly, memeMinScore, analysisOnly, analysisMinScore, todayOnly, articleTimeoutMs, retries, concurrency, aiClassify, aiProvider, aiMode, aiMinConfidence, start: start || null, end: end || null },
     generatedAt: new Date().toISOString(),
     totalPosts: posts.length,
-    totalScanned: runs.reduce((sum, run) => sum + Number(run.payload?.totalScanned || 0), 0),
-    accounts: runs.map((run) => ({
-      username: run.username,
-      totalPosts: run.payload?.totalPosts || 0,
-      totalScanned: run.payload?.totalScanned || 0
-    })),
+    totalScanned: Number(batchRun?.payload?.totalScanned || 0),
+    accounts: batchRun?.payload?.accounts ?? [],
     errors,
     posts
   };
@@ -611,8 +694,8 @@ async function collectWithBrowser(requestBody) {
     ...payload,
     outputFile,
     csvFile,
-    stdout: runs.map((run) => run.stdout).join("\n"),
-    stderr: [...runs.map((run) => run.stderr), ...errors.map((error) => error.stderr)].filter(Boolean).join("\n")
+    stdout: batchRun?.stdout || "",
+    stderr: [batchRun?.stderr, ...errors.map((error) => error.stderr)].filter(Boolean).join("\n")
   };
 }
 
@@ -771,6 +854,19 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/telegram/status") {
+      jsonResponse(response, 200, {
+        running: Boolean(activeTelegramRun),
+        ...lastTelegramRun
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/telegram/latest") {
+      jsonResponse(response, 200, await readLatestTelegramRun());
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/monitor/status") {
       jsonResponse(response, 200, monitorSnapshot());
       return;
@@ -883,6 +979,67 @@ const server = http.createServer(async (request, response) => {
         accepted: true,
         running: true,
         ...lastBrowserRun
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/telegram/collect") {
+      if (activeTelegramRun) {
+        jsonResponse(response, 409, {
+          running: true,
+          message: "Telegram scrape is already running"
+        });
+        return;
+      }
+
+      const requestBody = await readRequestJson(request);
+      lastTelegramRun = {
+        status: "running",
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+        outputFile: null,
+        csvFile: null,
+        totalPosts: 0,
+        error: null,
+        stdout: "",
+        stderr: ""
+      };
+      activeTelegramRun = collectWithTelegram(requestBody);
+      activeTelegramRun
+        .then((result) => {
+          lastTelegramRun = {
+            status: "completed",
+            startedAt: lastTelegramRun.startedAt,
+            finishedAt: new Date().toISOString(),
+            outputFile: result.outputFile,
+            csvFile: result.csvFile,
+            totalPosts: result.totalPosts,
+            error: result.errors?.length ? `${result.errors.length} Telegram targets failed` : null,
+            stdout: result.stdout,
+            stderr: result.stderr
+          };
+        })
+        .catch((error) => {
+          lastTelegramRun = {
+            status: "failed",
+            startedAt: lastTelegramRun.startedAt,
+            finishedAt: new Date().toISOString(),
+            outputFile: null,
+            csvFile: null,
+            totalPosts: 0,
+            error: error.message,
+            stdout: error.stdout || "",
+            stderr: error.stderr || ""
+          };
+        })
+        .finally(() => {
+          activeTelegramRun = null;
+        });
+
+      jsonResponse(response, 202, {
+        accepted: true,
+        running: true,
+        ...lastTelegramRun
       });
       return;
     }

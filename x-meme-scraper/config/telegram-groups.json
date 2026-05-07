@@ -1,0 +1,8 @@
+{
+  "groups": [
+    {
+      "name": "Example public channel",
+      "target": "telegram"
+    }
+  ]
+}

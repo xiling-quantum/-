@@ -39,6 +39,18 @@ function parseDateArg(name) {
   return date;
 }
 
+function argList(name, fallback = []) {
+  const raw = String(argValue(name, "") ?? "").trim();
+  if (!raw) return fallback;
+  return raw.split(",").map((item) => normalizeUsername(item)).filter(Boolean);
+}
+
+function boundedNumber(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(number)));
+}
+
 function startOfLocalDay() {
   const date = new Date();
   date.setHours(0, 0, 0, 0);
@@ -421,42 +433,33 @@ async function extractPosts(page, username, maxPosts) {
   );
 }
 
-async function main() {
-  const username = normalizeUsername(argValue("user", "heyibinance"));
-  const maxPosts = Number(argValue("max", "20"));
-  const maxScrolls = Number(argValue("scrolls", "12"));
-  const headless = argValue("headless", "false") === "true";
-  const articleTimeoutMs = Number(argValue("articleTimeoutMs", "20000"));
-  const retries = Number(argValue("retries", "1"));
-  const query = String(argValue("query", "") ?? "").trim();
-  const memeOnly = argValue("memeOnly", "false") === "true";
-  const memeMinScore = Number(argValue("memeMinScore", "2"));
-  const analysisOnly = argValue("analysisOnly", "false") === "true";
-  const analysisMinScore = Number(argValue("analysisMinScore", "3"));
-  const todayOnly = argValue("todayOnly", "false") === "true";
-  const aiClassify = argValue("aiClassify", "false") === "true";
-  const aiProvider = argValue("aiProvider", process.env.AI_PROVIDER || "openai");
-  const aiMode = argValue("aiMode", analysisOnly ? "analysis" : "meme");
-  const aiMinConfidence = Number(argValue("aiMinConfidence", "0.65"));
-  const startDate = parseDateArg("start") || (todayOnly ? startOfLocalDay() : null);
-  const endDate = parseDateArg("end");
+async function scrapeUser(context, username, options) {
+  const {
+    maxPosts,
+    maxScrolls,
+    headless,
+    articleTimeoutMs,
+    retries,
+    query,
+    memeOnly,
+    memeMinScore,
+    analysisOnly,
+    analysisMinScore,
+    todayOnly,
+    aiClassify,
+    aiProvider,
+    aiMode,
+    aiMinConfidence,
+    startDate,
+    endDate
+  } = options;
 
   if (!/^[A-Za-z0-9_]{1,15}$/.test(username)) {
     throw new Error(`Invalid X username: ${username}`);
   }
 
-  await fs.mkdir(dataDir, { recursive: true });
-
-  const context = await chromium.launchPersistentContext(sessionDir, {
-    headless,
-    viewport: { width: 1280, height: 900 },
-    locale: "zh-CN",
-    userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-  });
-
+  const page = await context.newPage();
   try {
-    const page = context.pages()[0] ?? (await context.newPage());
     await page.goto(`https://x.com/${username}`, { waitUntil: "domcontentloaded", timeout: 45_000 });
 
     const loginVisible = await page
@@ -466,8 +469,7 @@ async function main() {
       .catch(() => false);
 
     if (loginVisible && !headless) {
-      console.log("X is asking for login. Complete login in the opened browser window.");
-      console.log("The scraper will continue automatically after the profile timeline is visible.");
+      console.log(`X is asking for login before @${username}. Complete login in the opened browser window.`);
       await page.locator("article").first().waitFor({ timeout: 300_000 });
     }
 
@@ -490,34 +492,154 @@ async function main() {
         .filter((post) => !analysisOnly || isAnalysisPost(post, analysisMinScore));
     }
 
-    posts = posts.slice(0, maxPosts);
+    return {
+      username,
+      filters: {
+        query,
+        memeOnly,
+        memeMinScore,
+        analysisOnly,
+        analysisMinScore,
+        todayOnly,
+        aiClassify,
+        aiProvider,
+        aiMode,
+        aiMinConfidence,
+        start: startDate?.toISOString() ?? null,
+        end: endDate?.toISOString() ?? null
+      },
+      totalScanned: rawPosts.length,
+      totalPosts: posts.slice(0, maxPosts).length,
+      generatedAt: new Date().toISOString(),
+      posts: posts.slice(0, maxPosts)
+    };
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+async function concurrentMap(items, limit, worker) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await worker(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+async function main() {
+  const users = argList("users", [normalizeUsername(argValue("user", "heyibinance"))]);
+  const maxPosts = Number(argValue("max", "20"));
+  const maxScrolls = Number(argValue("scrolls", "12"));
+  const headless = argValue("headless", "false") === "true";
+  const articleTimeoutMs = Number(argValue("articleTimeoutMs", "20000"));
+  const retries = Number(argValue("retries", "1"));
+  const concurrency = boundedNumber(argValue("concurrency", "3"), 3, 1, 5);
+  const query = String(argValue("query", "") ?? "").trim();
+  const memeOnly = argValue("memeOnly", "false") === "true";
+  const memeMinScore = Number(argValue("memeMinScore", "2"));
+  const analysisOnly = argValue("analysisOnly", "false") === "true";
+  const analysisMinScore = Number(argValue("analysisMinScore", "3"));
+  const todayOnly = argValue("todayOnly", "false") === "true";
+  const aiClassify = argValue("aiClassify", "false") === "true";
+  const aiProvider = argValue("aiProvider", process.env.AI_PROVIDER || "openai");
+  const aiMode = argValue("aiMode", analysisOnly ? "analysis" : "meme");
+  const aiMinConfidence = Number(argValue("aiMinConfidence", "0.65"));
+  const startDate = parseDateArg("start") || (todayOnly ? startOfLocalDay() : null);
+  const endDate = parseDateArg("end");
+
+  await fs.mkdir(dataDir, { recursive: true });
+
+  const context = await chromium.launchPersistentContext(sessionDir, {
+    headless,
+    viewport: { width: 1280, height: 900 },
+    locale: "zh-CN",
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+  });
+
+  try {
+    await Promise.all(context.pages().map((page) => page.close().catch(() => {})));
+    const settled = await concurrentMap(users, concurrency, async (username) => {
+      try {
+        return {
+          ok: true,
+          result: await scrapeUser(context, username, {
+            maxPosts,
+            maxScrolls,
+            headless,
+            articleTimeoutMs,
+            retries,
+            query,
+            memeOnly,
+            memeMinScore,
+            analysisOnly,
+            analysisMinScore,
+            todayOnly,
+            aiClassify,
+            aiProvider,
+            aiMode,
+            aiMinConfidence,
+            startDate,
+            endDate
+          })
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          username,
+          error: error.message
+        };
+      }
+    });
+
+    const runs = settled.filter((item) => item.ok).map((item) => item.result);
+    const errors = settled.filter((item) => !item.ok).map((item) => ({ username: item.username, message: item.error }));
+    const posts = runs
+      .flatMap((run) => run.posts)
+      .sort((left, right) => String(right.publishedAt || "").localeCompare(String(left.publishedAt || "")));
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const jsonPath = path.join(dataDir, `browser-${username}-${timestamp}.json`);
-    const csvPath = path.join(dataDir, `browser-${username}-${timestamp}.csv`);
+    const runName = users.length === 1 ? users[0] : "monitor";
+    const jsonPath = path.join(dataDir, `browser-${runName}-${timestamp}.json`);
+    const csvPath = path.join(dataDir, `browser-${runName}-${timestamp}.csv`);
+    const payload = {
+      username: users.length === 1 ? users[0] : "monitor",
+      usernames: users,
+      concurrency,
+      filters: {
+        query,
+        memeOnly,
+        memeMinScore,
+        analysisOnly,
+        analysisMinScore,
+        todayOnly,
+        aiClassify,
+        aiProvider,
+        aiMode,
+        aiMinConfidence,
+        start: startDate?.toISOString() ?? null,
+        end: endDate?.toISOString() ?? null
+      },
+      totalScanned: runs.reduce((sum, run) => sum + Number(run.totalScanned || 0), 0),
+      totalPosts: posts.length,
+      generatedAt: new Date().toISOString(),
+      accounts: runs.map((run) => ({
+        username: run.username,
+        totalPosts: run.totalPosts,
+        totalScanned: run.totalScanned
+      })),
+      errors,
+      posts
+    };
 
     await fs.writeFile(
       jsonPath,
-      `${JSON.stringify({
-        username,
-        filters: {
-          query,
-          memeOnly,
-          memeMinScore,
-          analysisOnly,
-          analysisMinScore,
-          todayOnly,
-          aiClassify,
-          aiProvider,
-          aiMode,
-          aiMinConfidence,
-          start: startDate?.toISOString() ?? null,
-          end: endDate?.toISOString() ?? null
-        },
-        totalScanned: rawPosts.length,
-        totalPosts: posts.length,
-        generatedAt: new Date().toISOString(),
-        posts
-      }, null, 2)}\n`,
+      `${JSON.stringify(payload, null, 2)}\n`,
       "utf8"
     );
 
@@ -538,7 +660,7 @@ async function main() {
     ];
     await fs.writeFile(csvPath, `${csvRows.join("\n")}\n`, "utf8");
 
-    console.log(`Scraped ${posts.length} posts from @${username}`);
+    console.log(`Scraped ${posts.length} posts from ${users.map((user) => `@${user}`).join(", ")} with concurrency ${concurrency}`);
     console.log(`JSON: ${jsonPath}`);
     console.log(`CSV:  ${csvPath}`);
   } finally {

@@ -276,7 +276,7 @@
 
       .filter-panel {
         display: grid;
-        grid-template-columns: 130px 110px 110px 140px 170px 170px 1fr auto;
+        grid-template-columns: 130px 110px 110px 110px 140px 170px 170px 1fr auto;
         gap: 10px;
         margin-bottom: 16px;
         align-items: end;
@@ -526,6 +526,9 @@
                 </label>
                 <label>滚动次数
                   <input id="maxScrolls" type="number" min="1" max="50" value="8">
+                </label>
+                <label>并发页数
+                  <input id="concurrency" type="number" min="1" max="5" value="3">
                 </label>
                 <label>meme 分数
                   <input id="memeMinScore" type="number" min="1" max="8" value="2">
@@ -818,6 +821,7 @@
             usernames,
             maxPosts: Number(document.getElementById("maxPosts").value),
             maxScrolls: Number(document.getElementById("maxScrolls").value),
+            concurrency: Number(document.getElementById("concurrency").value),
             query: document.getElementById("query").value.trim(),
             start: document.getElementById("startDate").value,
             end: document.getElementById("endDate").value,
@@ -847,6 +851,7 @@
           usernames: handles.length ? handles : selectedHandles(),
           maxPosts: Number(document.getElementById("maxPosts").value),
           maxScrolls: Number(document.getElementById("maxScrolls").value),
+          concurrency: Number(document.getElementById("concurrency").value),
           query: document.getElementById("query").value.trim(),
           start: document.getElementById("startDate").value,
           end: document.getElementById("endDate").value,

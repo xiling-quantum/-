@@ -1,0 +1,174 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+import { TelegramClient } from "telegram";
+import { StringSession } from "telegram/sessions/index.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, "..");
+const dataDir = path.join(projectRoot, "data");
+const configPath = path.join(projectRoot, "config", "telegram-groups.json");
+
+function argValue(name, fallback) {
+  const index = process.argv.indexOf(`--${name}`);
+  if (index !== -1 && process.argv[index + 1]) return process.argv[index + 1];
+  const inline = process.argv.find((arg) => arg.startsWith(`--${name}=`));
+  return inline ? inline.slice(name.length + 3) : fallback;
+}
+
+function csvCell(value) {
+  return `"${String(value ?? "").replaceAll('"', '""')}"`;
+}
+
+function listArg(name) {
+  const raw = String(argValue(name, "") ?? "").trim();
+  if (!raw) return [];
+  return raw.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function normalizeTarget(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/^https?:\/\/t\.me\//i, "")
+    .replace(/^@+/, "")
+    .split(/[?#]/)[0];
+}
+
+function textMatches(text, query) {
+  const needle = String(query ?? "").trim().toLowerCase();
+  if (!needle) return true;
+  return String(text ?? "").toLowerCase().includes(needle);
+}
+
+const MEME_SIGNALS = [
+  /\bmeme\s*coin\b/i,
+  /\bmemecoin\b/i,
+  /\bmeme\b/i,
+  /\bdegen\b/i,
+  /\bpump\.?fun\b/i,
+  /\bca[:\s]/i,
+  /\bcontract\s*address\b/i,
+  /\$[A-Z][A-Z0-9_]{1,11}\b/,
+  /\b(pepe|doge|shib|bonk|wif|floki|popcat|mog|giga)\b/i,
+  /土狗|迷因|合约地址|冲土狗|发射/i
+];
+
+function memeScore(text) {
+  return MEME_SIGNALS.reduce((score, pattern) => score + (pattern.test(text || "") ? 1 : 0), 0);
+}
+
+async function readTargets() {
+  const cliTargets = listArg("groups").map(normalizeTarget);
+  if (cliTargets.length) return cliTargets;
+  const config = JSON.parse(await fs.readFile(configPath, "utf8"));
+  return (config.groups ?? []).map((group) => normalizeTarget(group.target)).filter(Boolean);
+}
+
+function messageUrl(target, id) {
+  const clean = normalizeTarget(target);
+  return clean ? `https://t.me/${clean}/${id}` : null;
+}
+
+async function main() {
+  const apiId = Number(process.env.TELEGRAM_API_ID || 0);
+  const apiHash = String(process.env.TELEGRAM_API_HASH || "").trim();
+  const stringSession = String(process.env.TELEGRAM_STRING_SESSION || "").trim();
+  const maxMessages = Math.max(1, Math.min(200, Number(argValue("max", "50")) || 50));
+  const query = String(argValue("query", "") ?? "").trim();
+  const memeOnly = argValue("memeOnly", "false") === "true";
+  const memeMinScore = Math.max(1, Math.min(8, Number(argValue("memeMinScore", "2")) || 2));
+  const targets = await readTargets();
+
+  if (!apiId || !apiHash || !stringSession) {
+    throw new Error("Set TELEGRAM_API_ID, TELEGRAM_API_HASH, and TELEGRAM_STRING_SESSION before scraping Telegram.");
+  }
+  if (!targets.length) {
+    throw new Error("No Telegram groups configured. Use --groups group1,group2 or edit config/telegram-groups.json.");
+  }
+
+  await fs.mkdir(dataDir, { recursive: true });
+
+  const client = new TelegramClient(new StringSession(stringSession), apiId, apiHash, {
+    connectionRetries: 5
+  });
+  await client.connect();
+
+  try {
+    const accounts = [];
+    const errors = [];
+    const posts = [];
+
+    for (const target of targets) {
+      try {
+        const entity = await client.getEntity(target);
+        const messages = await client.getMessages(entity, { limit: maxMessages });
+        let matched = 0;
+        for (const message of messages) {
+          const text = message.message || "";
+          if (!textMatches(text, query)) continue;
+          const score = memeScore(text);
+          if (memeOnly && score < memeMinScore) continue;
+          matched += 1;
+          posts.push({
+            id: String(message.id),
+            platform: "telegram",
+            group: target,
+            authorHandle: target,
+            publishedAt: message.date ? new Date(message.date * 1000).toISOString() : null,
+            text,
+            memeScore: score,
+            url: messageUrl(target, message.id),
+            scrapedAt: new Date().toISOString()
+          });
+        }
+        accounts.push({ target, scanned: messages.length, matched });
+      } catch (error) {
+        errors.push({ target, message: error.message });
+      }
+    }
+
+    posts.sort((left, right) => String(right.publishedAt || "").localeCompare(String(left.publishedAt || "")));
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const jsonPath = path.join(dataDir, `telegram-monitor-${timestamp}.json`);
+    const csvPath = path.join(dataDir, `telegram-monitor-${timestamp}.csv`);
+    const payload = {
+      source: "telegram",
+      targets,
+      filters: { query, memeOnly, memeMinScore, maxMessages },
+      generatedAt: new Date().toISOString(),
+      totalPosts: posts.length,
+      accounts,
+      errors,
+      posts
+    };
+
+    await fs.writeFile(jsonPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+    await fs.writeFile(path.join(dataDir, "telegram-latest.json"), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+    const csvRows = [
+      ["id", "group", "publishedAt", "memeScore", "text", "url", "scrapedAt"].map(csvCell).join(","),
+      ...posts.map((post) => [
+        post.id,
+        post.group,
+        post.publishedAt,
+        post.memeScore,
+        post.text,
+        post.url,
+        post.scrapedAt
+      ].map(csvCell).join(","))
+    ];
+    await fs.writeFile(csvPath, `${csvRows.join("\n")}\n`, "utf8");
+
+    console.log(`Scraped ${posts.length} Telegram messages from ${targets.join(", ")}`);
+    console.log(`JSON: ${jsonPath}`);
+    console.log(`CSV:  ${csvPath}`);
+  } finally {
+    await client.disconnect();
+  }
+}
+
+main().catch((error) => {
+  console.error(error.message);
+  process.exitCode = 1;
+});
