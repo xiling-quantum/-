@@ -681,28 +681,87 @@ async function listBrowserRuns() {
   return runs.sort((left, right) => right.modifiedAt.localeCompare(left.modifiedAt));
 }
 
+async function loadBrowserRun(run) {
+  return {
+    file: run.file,
+    path: run.path,
+    size: run.size || 0,
+    ...(JSON.parse(await fs.readFile(run.path, "utf8")))
+  };
+}
+
+function browserRunGroupKey(run) {
+  const time = new Date(run.generatedAt || run.modifiedAt || 0).getTime();
+  if (!Number.isFinite(time)) return run.file;
+  return String(Math.floor(time / 5000));
+}
+
+function preferBrowserRun(left, right) {
+  const leftEnriched = Array.isArray(left.consensus) ? 1 : 0;
+  const rightEnriched = Array.isArray(right.consensus) ? 1 : 0;
+  if (leftEnriched !== rightEnriched) return rightEnriched - leftEnriched;
+  return Number(right.size || 0) - Number(left.size || 0);
+}
+
+async function listLoadedBrowserRuns() {
+  const loaded = [];
+  for (const run of await listBrowserRuns()) {
+    try {
+      loaded.push(await loadBrowserRun(run));
+    } catch {
+      // Ignore corrupt partial files.
+    }
+  }
+  return loaded;
+}
+
+function uniqueBrowserRunAttempts(runs) {
+  const groups = new Map();
+  for (const run of runs) {
+    const key = browserRunGroupKey(run);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(run);
+  }
+  return [...groups.values()]
+    .map((group) => group.sort(preferBrowserRun)[0])
+    .sort((left, right) => String(right.generatedAt || "").localeCompare(String(left.generatedAt || "")));
+}
+
+function withNewPostDelta(current, previous) {
+  const previousIds = new Set((previous?.posts || []).map((post) => String(post.id || post.url || "")));
+  const newPosts = (current.posts || []).filter((post) => !previousIds.has(String(post.id || post.url || "")));
+  return {
+    ...current,
+    allTotalPosts: Number(current.totalPosts || 0),
+    newTotalPosts: newPosts.length,
+    newPosts,
+    previousRun: previous ? {
+      file: previous.file,
+      generatedAt: previous.generatedAt,
+      totalPosts: previous.totalPosts || 0
+    } : null
+  };
+}
+
 async function readLatestBrowserRun() {
-  const runs = await listBrowserRuns();
+  const runs = uniqueBrowserRunAttempts(await listLoadedBrowserRuns());
   if (!runs.length) {
     return {
       generatedAt: null,
       username: null,
       latestAttempt: null,
+      newTotalPosts: 0,
+      newPosts: [],
       totalPosts: 0,
       posts: []
     };
   }
 
-  const loadRun = async (run) => ({
-    file: run.file,
-    path: run.path,
-    ...(JSON.parse(await fs.readFile(run.path, "utf8")))
-  });
-
-  const latestAttempt = await loadRun(runs[0]);
+  const latestAttempt = runs[0];
   if (Number(latestAttempt.totalPosts || 0) > 0) {
+    const previous = runs.slice(1).find((run) => Number(run.totalPosts || 0) > 0);
     return {
-      ...latestAttempt,
+      ...withNewPostDelta(latestAttempt, previous),
       latestAttempt: {
         file: latestAttempt.file,
         generatedAt: latestAttempt.generatedAt,
@@ -713,10 +772,11 @@ async function readLatestBrowserRun() {
   }
 
   for (const run of runs.slice(1)) {
-    const candidate = await loadRun(run);
+    const candidate = run;
     if (Number(candidate.totalPosts || 0) > 0) {
+      const previous = runs.slice(runs.indexOf(run) + 1).find((item) => Number(item.totalPosts || 0) > 0);
       return {
-        ...candidate,
+        ...withNewPostDelta(candidate, previous),
         staleBecauseLatestFailed: true,
         latestAttempt: {
           file: latestAttempt.file,
@@ -730,6 +790,8 @@ async function readLatestBrowserRun() {
 
   return {
     ...latestAttempt,
+    newTotalPosts: 0,
+    newPosts: [],
     latestAttempt: {
       file: latestAttempt.file,
       generatedAt: latestAttempt.generatedAt,

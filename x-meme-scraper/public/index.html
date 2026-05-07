@@ -912,7 +912,7 @@
 
       function renderFeed(data) {
         state.latest = data;
-        const posts = data?.posts || [];
+        const posts = Array.isArray(data?.newPosts) ? data.newPosts : (data?.posts || []);
         const consensus = data?.consensus || [];
         const consensusHtml = consensus.length ? `
           <div class="consensus-panel">
@@ -925,7 +925,12 @@
           </div>
         ` : "";
         if (!posts.length) {
+          const total = Number(data?.allTotalPosts ?? data?.totalPosts ?? 0);
+          const emptyText = total > 0
+            ? `本轮无更新。最新抓取匹配 ${total} 条，但没有新增推文。`
+            : "还没有推文结果。可从关注列表批量抓取，或在这里点击开始抓取。";
           feedList.innerHTML = `${consensusHtml}<div class="empty">还没有推文结果。可从关注列表批量抓取，或在这里点击开始抓取。</div>`;
+          feedList.innerHTML = `${consensusHtml}<div class="empty">${escapeHtml(emptyText)}</div>`;
           renderActivity(data);
           return;
         }
@@ -992,7 +997,7 @@
       }
 
       function renderActivity(data) {
-        const posts = data?.posts || [];
+        const posts = Array.isArray(data?.newPosts) ? data.newPosts : (data?.posts || []);
         const rows = posts.slice(0, 12).map((post) => {
           const handle = String(post.authorHandle || "").replace(/^@/, "");
           const watcher = state.watchers.find((item) => cleanHandle(item.handle).toLowerCase() === handle.toLowerCase());
@@ -1014,6 +1019,7 @@
         const response = await fetch(`/api/browser/latest?t=${Date.now()}`, { cache: "no-store" });
         const data = await response.json();
         renderFeed(data);
+        return data;
       }
 
       async function pollStatus() {
@@ -1028,7 +1034,10 @@
         }
         if (status.status === "completed") {
           setStatus(`抓取完成：${status.totalPosts} 条匹配推文。`, "good");
-          await loadLatest();
+          const latest = await loadLatest();
+          const newTotal = Number(latest?.newTotalPosts ?? latest?.totalPosts ?? status.totalPosts ?? 0);
+          const total = Number(latest?.allTotalPosts ?? latest?.totalPosts ?? status.totalPosts ?? 0);
+          setStatus(newTotal > 0 ? `抓取完成：匹配 ${total} 条，新增 ${newTotal} 条。` : `抓取完成：匹配 ${total} 条，本轮无更新。`, "good");
           return;
         }
         if (status.status === "failed") {
