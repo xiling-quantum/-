@@ -1,0 +1,15 @@
+{
+  "maxPosts": 20,
+  "maxScrolls": 4,
+  "concurrency": 2,
+  "memeMinScore": 2,
+  "aiMinConfidence": 0.65,
+  "aiProvider": "openai",
+  "query": "",
+  "intervalSeconds": 600,
+  "soundEnabled": true,
+  "memeOnly": true,
+  "aiClassify": false,
+  "headless": true,
+  "accountSelect": "__selected__"
+}

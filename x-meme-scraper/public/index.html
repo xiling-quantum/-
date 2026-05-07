@@ -282,6 +282,10 @@
         align-items: end;
       }
 
+      .filter-panel label:not(:has(input, select)) {
+        display: none;
+      }
+
       .checks {
         display: flex;
         align-items: center;
@@ -619,10 +623,8 @@
                   <input id="query" placeholder="可留空">
                 </label>
                 <label>开始时间
-                  <input id="startDate" type="datetime-local">
                 </label>
                 <label>结束时间
-                  <input id="endDate" type="datetime-local">
                 </label>
                 <label>抓取账号
                   <select id="accountSelect"></select>
@@ -701,6 +703,23 @@
       const mediaLightboxImage = document.getElementById("mediaLightboxImage");
       const mediaLightboxClose = document.getElementById("mediaLightboxClose");
       let appInfo = { mode: "meme" };
+      let settingsSaveTimer = null;
+
+      const settingIds = [
+        "maxPosts",
+        "maxScrolls",
+        "concurrency",
+        "memeMinScore",
+        "aiMinConfidence",
+        "aiProvider",
+        "query",
+        "intervalSeconds",
+        "soundEnabled",
+        "memeOnly",
+        "aiClassify",
+        "headless",
+        "accountSelect"
+      ];
 
       function loadLocalWatchers() {
         try {
@@ -736,6 +755,61 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ watchers: state.watchers })
         });
+      }
+
+      function readUiSettingsFromForm() {
+        return {
+          maxPosts: Number(document.getElementById("maxPosts").value),
+          maxScrolls: Number(document.getElementById("maxScrolls").value),
+          concurrency: Number(document.getElementById("concurrency").value),
+          memeMinScore: Number(document.getElementById("memeMinScore").value),
+          aiMinConfidence: Number(document.getElementById("aiMinConfidence").value),
+          aiProvider: document.getElementById("aiProvider").value,
+          query: document.getElementById("query").value.trim(),
+          intervalSeconds: Number(document.getElementById("intervalSeconds").value),
+          soundEnabled: document.getElementById("soundEnabled").checked,
+          memeOnly: document.getElementById("memeOnly").checked,
+          aiClassify: document.getElementById("aiClassify").checked,
+          headless: document.getElementById("headless").checked,
+          accountSelect: document.getElementById("accountSelect").value
+        };
+      }
+
+      function applyUiSettings(settings = {}) {
+        for (const [id, value] of Object.entries(settings)) {
+          const element = document.getElementById(id);
+          if (!element || value === undefined || value === null) continue;
+          if (element.type === "checkbox") {
+            element.checked = Boolean(value);
+          } else {
+            element.value = String(value);
+          }
+        }
+      }
+
+      async function loadUiSettings() {
+        try {
+          const response = await fetch(`/api/ui-settings?t=${Date.now()}`, { cache: "no-store" });
+          if (!response.ok) return;
+          applyUiSettings(await response.json());
+        } catch {}
+      }
+
+      async function saveUiSettingsNow() {
+        const settings = readUiSettingsFromForm();
+        localStorage.setItem("x-monitor-ui-settings", JSON.stringify(settings));
+        await fetch("/api/ui-settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(settings)
+        });
+      }
+
+      function scheduleUiSettingsSave() {
+        clearTimeout(settingsSaveTimer);
+        settingsSaveTimer = setTimeout(() => {
+          saveUiSettingsNow().catch(() => {});
+        }, 250);
       }
 
       function escapeHtml(value) {
@@ -971,6 +1045,7 @@
           return;
         }
         setStatus("已提交抓取任务...", "warn");
+        await saveUiSettingsNow().catch(() => {});
         scrapeButton.disabled = true;
         const response = await fetch("/api/browser/collect", {
           method: "POST",
@@ -981,8 +1056,6 @@
             maxScrolls: Number(document.getElementById("maxScrolls").value),
             concurrency: Number(document.getElementById("concurrency").value),
             query: document.getElementById("query").value.trim(),
-            start: document.getElementById("startDate").value,
-            end: document.getElementById("endDate").value,
             headless: document.getElementById("headless").checked,
             memeOnly: document.getElementById("memeOnly").checked,
             memeMinScore: Number(document.getElementById("memeMinScore").value),
@@ -1011,8 +1084,6 @@
           maxScrolls: Number(document.getElementById("maxScrolls").value),
           concurrency: Number(document.getElementById("concurrency").value),
           query: document.getElementById("query").value.trim(),
-          start: document.getElementById("startDate").value,
-          end: document.getElementById("endDate").value,
           headless: document.getElementById("headless").checked,
           memeOnly: document.getElementById("memeOnly").checked,
           memeMinScore: Number(document.getElementById("memeMinScore").value),
@@ -1122,6 +1193,7 @@
           setStatus("请先选择至少一个关注账号。", "bad");
           return;
         }
+        await saveUiSettingsNow().catch(() => {});
         await fetch("/api/monitor/start", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1160,9 +1232,17 @@
         if (event.key === "Escape") closeMedia();
       });
 
+      settingIds.forEach((id) => {
+        const element = document.getElementById(id);
+        if (!element) return;
+        element.addEventListener("input", scheduleUiSettingsSave);
+        element.addEventListener("change", scheduleUiSettingsSave);
+      });
+
       await loadAppInfo();
       await loadWatchers();
       renderWatchers();
+      await loadUiSettings();
       await loadLatest();
       await loadMonitorStatus();
       await pollStatus();

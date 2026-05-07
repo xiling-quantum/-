@@ -10,6 +10,7 @@ const projectRoot = path.resolve(__dirname, "..");
 const publicDir = path.join(projectRoot, "public");
 const configPath = path.join(projectRoot, "config", "bloggers.json");
 const watchersPath = path.join(projectRoot, "config", "watchers.json");
+const uiSettingsPath = path.join(projectRoot, "config", "ui-settings.json");
 const dataDir = path.join(projectRoot, "data");
 const defaultPort = Number(process.env.PORT || 48931);
 const appMode = process.env.APP_MODE === "analysis" ? "analysis" : "meme";
@@ -162,6 +163,56 @@ async function writeWatchers(watchers) {
   await fs.mkdir(path.dirname(watchersPath), { recursive: true });
   await fs.writeFile(watchersPath, `${JSON.stringify({ watchers: unique }, null, 2)}\n`, "utf8");
   return unique;
+}
+
+const defaultUiSettings = {
+  maxPosts: 20,
+  maxScrolls: 8,
+  concurrency: 3,
+  memeMinScore: 2,
+  aiMinConfidence: 0.65,
+  aiProvider: "openai",
+  query: "",
+  intervalSeconds: 180,
+  soundEnabled: true,
+  memeOnly: true,
+  aiClassify: false,
+  headless: true,
+  accountSelect: "__selected__"
+};
+
+function normalizeUiSettings(value = {}) {
+  return {
+    maxPosts: boundedNumber(value.maxPosts, defaultUiSettings.maxPosts, 1, 100),
+    maxScrolls: boundedNumber(value.maxScrolls, defaultUiSettings.maxScrolls, 1, 50),
+    concurrency: boundedNumber(value.concurrency, defaultUiSettings.concurrency, 1, 5),
+    memeMinScore: boundedNumber(value.memeMinScore, defaultUiSettings.memeMinScore, 1, 8),
+    aiMinConfidence: Math.max(0, Math.min(1, Number(value.aiMinConfidence ?? defaultUiSettings.aiMinConfidence))),
+    aiProvider: ["openai", "deepseek", "kimi"].includes(value.aiProvider) ? value.aiProvider : defaultUiSettings.aiProvider,
+    query: String(value.query ?? defaultUiSettings.query).slice(0, 200),
+    intervalSeconds: boundedNumber(value.intervalSeconds, defaultUiSettings.intervalSeconds, 30, 3600),
+    soundEnabled: value.soundEnabled !== false,
+    memeOnly: value.memeOnly !== false,
+    aiClassify: Boolean(value.aiClassify),
+    headless: value.headless !== false,
+    accountSelect: String(value.accountSelect || defaultUiSettings.accountSelect).slice(0, 80)
+  };
+}
+
+async function readUiSettings() {
+  try {
+    const saved = JSON.parse(await fs.readFile(uiSettingsPath, "utf8"));
+    return normalizeUiSettings({ ...defaultUiSettings, ...saved });
+  } catch {
+    return { ...defaultUiSettings };
+  }
+}
+
+async function writeUiSettings(settings) {
+  const normalized = normalizeUiSettings({ ...defaultUiSettings, ...settings });
+  await fs.mkdir(path.dirname(uiSettingsPath), { recursive: true });
+  await fs.writeFile(uiSettingsPath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+  return normalized;
 }
 
 function normalizeUsername(value) {
@@ -631,19 +682,60 @@ async function listBrowserRuns() {
 }
 
 async function readLatestBrowserRun() {
-  const [latest] = await listBrowserRuns();
-  if (!latest) {
+  const runs = await listBrowserRuns();
+  if (!runs.length) {
     return {
       generatedAt: null,
       username: null,
+      latestAttempt: null,
       totalPosts: 0,
       posts: []
     };
   }
+
+  const loadRun = async (run) => ({
+    file: run.file,
+    path: run.path,
+    ...(JSON.parse(await fs.readFile(run.path, "utf8")))
+  });
+
+  const latestAttempt = await loadRun(runs[0]);
+  if (Number(latestAttempt.totalPosts || 0) > 0) {
+    return {
+      ...latestAttempt,
+      latestAttempt: {
+        file: latestAttempt.file,
+        generatedAt: latestAttempt.generatedAt,
+        totalPosts: latestAttempt.totalPosts,
+        errors: latestAttempt.errors || []
+      }
+    };
+  }
+
+  for (const run of runs.slice(1)) {
+    const candidate = await loadRun(run);
+    if (Number(candidate.totalPosts || 0) > 0) {
+      return {
+        ...candidate,
+        staleBecauseLatestFailed: true,
+        latestAttempt: {
+          file: latestAttempt.file,
+          generatedAt: latestAttempt.generatedAt,
+          totalPosts: latestAttempt.totalPosts || 0,
+          errors: latestAttempt.errors || []
+        }
+      };
+    }
+  }
+
   return {
-    file: latest.file,
-    path: latest.path,
-    ...(JSON.parse(await fs.readFile(latest.path, "utf8")))
+    ...latestAttempt,
+    latestAttempt: {
+      file: latestAttempt.file,
+      generatedAt: latestAttempt.generatedAt,
+      totalPosts: latestAttempt.totalPosts || 0,
+      errors: latestAttempt.errors || []
+    }
   };
 }
 
@@ -1031,6 +1123,17 @@ const server = http.createServer(async (request, response) => {
       jsonResponse(response, 200, {
         watchers: await readWatchers()
       });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/ui-settings") {
+      jsonResponse(response, 200, await readUiSettings());
+      return;
+    }
+
+    if (request.method === "PUT" && url.pathname === "/api/ui-settings") {
+      const requestBody = await readRequestJson(request);
+      jsonResponse(response, 200, await writeUiSettings(requestBody));
       return;
     }
 
