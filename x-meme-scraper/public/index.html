@@ -420,7 +420,7 @@
 
       .tweet-media img {
         width: 100%;
-        max-height: 520px;
+        max-height: 680px;
         object-fit: contain;
         border-radius: 6px;
         display: block;
@@ -768,7 +768,18 @@
           && !src.includes("abs.twimg.com/emoji")
           && !src.includes("/hashflags/")
           && !src.includes("profile_images")
-        );
+        ).map(highQualityImageUrl);
+      }
+
+      function highQualityImageUrl(src) {
+        try {
+          const url = new URL(src);
+          if (url.hostname === "pbs.twimg.com") {
+            url.searchParams.set("name", "large");
+            return url.toString();
+          }
+        } catch {}
+        return src;
       }
 
       function openMedia(src) {

@@ -491,7 +491,19 @@ async function extractPosts(page, username, maxPosts) {
             && !src.includes("abs.twimg.com/emoji")
             && !src.includes("/hashflags/")
             && !src.startsWith("data:")
-          );
+          )
+          .map((src) => {
+            try {
+              const url = new URL(src);
+              if (url.hostname === "pbs.twimg.com") {
+                url.searchParams.set("name", "large");
+                return url.toString();
+              }
+            } catch {
+              // Keep original URL.
+            }
+            return src;
+          });
 
         const videos = [...article.querySelectorAll("video")]
           .map((video) => video.poster || video.currentSrc || video.src)
