@@ -877,7 +877,7 @@ async function collectWithBrowser(requestBody) {
   };
   await fs.writeFile(outputFile, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
   const csvRows = [
-    ["id", "url", "authorHandle", "publishedAt", "text", "coinMentions", "consensusSignals", "imageUrls", "videoPosters", "scrapedAt"].map(csvCell).join(","),
+    ["id", "url", "authorHandle", "publishedAt", "text", "contractAddresses", "coinMentions", "consensusSignals", "imageUrls", "videoPosters", "scrapedAt"].map(csvCell).join(","),
     ...posts.map((post) =>
       [
         post.id,
@@ -885,6 +885,7 @@ async function collectWithBrowser(requestBody) {
         post.authorHandle,
         post.publishedAt,
         post.text,
+        (post.contractAddresses || []).join(" "),
         (post.coinMentions || []).map((item) => item.display).join(" "),
         (post.consensusSignals || []).map((item) => item.display).join(" "),
         (post.imageUrls || []).join(" "),

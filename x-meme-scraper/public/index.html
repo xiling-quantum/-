@@ -793,6 +793,13 @@
                 <div class="tweet-time">${escapeHtml(formatDate(post.publishedAt))}</div>
               </div>
               <p class="tweet-text">${escapeHtml(post.text)}</p>
+              ${(post.contractAddresses || []).length ? `
+                <div class="tweet-badges">
+                  ${(post.contractAddresses || []).slice(0, 3).map((address) => `
+                    <span class="tweet-badge consensus">合约地址 ${escapeHtml(address.slice(0, 6))}...${escapeHtml(address.slice(-4))}</span>
+                  `).join("")}
+                </div>
+              ` : ""}
               ${(post.consensusSignals || []).length ? `
                 <div class="tweet-badges">
                   ${(post.consensusSignals || []).slice(0, 4).map((signal) => `

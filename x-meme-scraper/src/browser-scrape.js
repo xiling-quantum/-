@@ -78,6 +78,21 @@ const MEME_SIGNALS = [
   { pattern: /土狗|迷因|meme币|合约地址|冲土狗|发射/i, weight: 2, reason: "中文 meme 信号" }
 ];
 
+function extractContractAddresses(text) {
+  const value = String(text ?? "");
+  const addresses = new Set();
+  for (const match of value.matchAll(/\b0x[a-fA-F0-9]{40}\b/g)) {
+    addresses.add(match[0]);
+  }
+  for (const match of value.matchAll(/\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g)) {
+    const address = match[0];
+    if (/[A-Z]/.test(address) && /[a-z]/.test(address) && /\d/.test(address)) {
+      addresses.add(address);
+    }
+  }
+  return [...addresses];
+}
+
 function memeAnalysis(post) {
   const text = String(post.text ?? "");
   const reasons = [];
@@ -92,13 +107,19 @@ function memeAnalysis(post) {
     score += 1;
     reasons.push("media + cashtag");
   }
-  return { score, reasons: [...new Set(reasons)] };
+  const contractAddresses = extractContractAddresses(text);
+  if (contractAddresses.length) {
+    score += 4;
+    reasons.push("contract address");
+  }
+  return { score, reasons: [...new Set(reasons)], contractAddresses };
 }
 
 function isMemeCoinPost(post, minScore) {
   const analysis = memeAnalysis(post);
   post.memeScore = analysis.score;
   post.memeReasons = analysis.reasons;
+  post.contractAddresses = analysis.contractAddresses;
   return analysis.score >= minScore;
 }
 
@@ -147,6 +168,7 @@ function annotateScores(post) {
   const meme = memeAnalysis(post);
   post.memeScore = meme.score;
   post.memeReasons = meme.reasons;
+  post.contractAddresses = meme.contractAddresses;
   const analysis = analysisPostScore(post);
   post.analysisScore = analysis.score;
   post.analysisReasons = analysis.reasons;
