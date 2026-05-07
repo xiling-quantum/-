@@ -8,7 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..");
 const dataDir = path.join(projectRoot, "data");
-const sessionDir = path.join(dataDir, "x-session");
+const defaultSessionDir = path.join(dataDir, "x-session");
 
 function argValue(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);
@@ -49,6 +49,17 @@ function boundedNumber(value, fallback, min, max) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.max(min, Math.min(max, Math.trunc(number)));
+}
+
+function parseProxy(proxyUrl) {
+  const raw = String(proxyUrl ?? "").trim();
+  if (!raw) return null;
+  const parsed = new URL(raw);
+  return {
+    server: `${parsed.protocol}//${parsed.hostname}${parsed.port ? `:${parsed.port}` : ""}`,
+    username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
+    password: parsed.password ? decodeURIComponent(parsed.password) : undefined
+  };
 }
 
 function startOfLocalDay() {
@@ -633,6 +644,8 @@ async function concurrentMap(items, limit, worker) {
 
 async function main() {
   const users = argList("users", [normalizeUsername(argValue("user", "heyibinance"))]);
+  const sessionDir = path.resolve(projectRoot, argValue("sessionDir", defaultSessionDir));
+  const proxy = parseProxy(argValue("proxy", ""));
   const maxPosts = Number(argValue("max", "20"));
   const maxScrolls = Number(argValue("scrolls", "12"));
   const headless = argValue("headless", "false") === "true";
@@ -656,6 +669,7 @@ async function main() {
 
   const context = await chromium.launchPersistentContext(sessionDir, {
     headless,
+    ...(proxy ? { proxy } : {}),
     viewport: { width: 1280, height: 900 },
     locale: "zh-CN",
     userAgent:

@@ -1,0 +1,16 @@
+{
+  "accounts": [
+    {
+      "name": "x_account_1",
+      "sessionDir": "data/x-sessions/x_account_1",
+      "proxy": "http://user:password@proxy1.example.com:8000",
+      "handles": ["memetokensX", "mars_bnb", "PepeBoost888"]
+    },
+    {
+      "name": "x_account_2",
+      "sessionDir": "data/x-sessions/x_account_2",
+      "proxy": "socks5://user:password@proxy2.example.com:1080",
+      "handles": ["0xldb", "chairbtc", "PSY_P488"]
+    }
+  ]
+}
