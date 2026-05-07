@@ -666,7 +666,7 @@
 
       async function loadWatchers() {
         try {
-          const response = await fetch("/api/watchers");
+          const response = await fetch(`/api/watchers?t=${Date.now()}`, { cache: "no-store" });
           const payload = await response.json();
           if (Array.isArray(payload.watchers) && payload.watchers.length) {
             state.watchers = payload.watchers;
@@ -858,13 +858,13 @@
       }
 
       async function loadLatest() {
-        const response = await fetch("/api/browser/latest");
+        const response = await fetch(`/api/browser/latest?t=${Date.now()}`, { cache: "no-store" });
         const data = await response.json();
         renderFeed(data);
       }
 
       async function pollStatus() {
-        const response = await fetch("/api/browser/status");
+        const response = await fetch(`/api/browser/status?t=${Date.now()}`, { cache: "no-store" });
         const status = await response.json();
         scrapeButton.disabled = Boolean(status.running);
         document.getElementById("batchButton").disabled = Boolean(status.running);
@@ -948,7 +948,7 @@
       }
 
       async function loadAppInfo() {
-        const response = await fetch("/api/app-info");
+        const response = await fetch(`/api/app-info?t=${Date.now()}`, { cache: "no-store" });
         appInfo = await response.json();
         document.title = appInfo.title || "推特秒级监控";
         appTitle.textContent = appInfo.title || "推特秒级监控";
@@ -961,7 +961,7 @@
       }
 
       async function loadMonitorStatus() {
-        const response = await fetch("/api/monitor/status");
+        const response = await fetch(`/api/monitor/status?t=${Date.now()}`, { cache: "no-store" });
         const monitor = await response.json();
         if (!monitor.enabled) {
           monitorInfo.textContent = "监控未启动";
