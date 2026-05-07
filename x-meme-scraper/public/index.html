@@ -326,6 +326,36 @@
         margin-bottom: 12px;
       }
 
+      .consensus-panel {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+        padding: 16px 18px;
+        margin-bottom: 14px;
+      }
+
+      .consensus-panel h3 {
+        margin: 0 0 10px;
+        font-size: 18px;
+      }
+
+      .consensus-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .consensus-chip {
+        border: 1px solid #bfdbfe;
+        border-radius: 999px;
+        background: #eff6ff;
+        color: #1d4ed8;
+        font-size: 13px;
+        font-weight: 900;
+        padding: 7px 10px;
+      }
+
       .tweet-top {
         display: flex;
         justify-content: space-between;
@@ -363,6 +393,11 @@
         font-size: 12px;
         font-weight: 800;
         padding: 4px 8px;
+      }
+
+      .tweet-badge.consensus {
+        background: #dcfce7;
+        color: #15803d;
       }
 
       .tweet-text {
@@ -726,12 +761,23 @@
       function renderFeed(data) {
         state.latest = data;
         const posts = data?.posts || [];
+        const consensus = data?.consensus || [];
+        const consensusHtml = consensus.length ? `
+          <div class="consensus-panel">
+            <h3>多博主共识币种</h3>
+            <div class="consensus-list">
+              ${consensus.slice(0, 12).map((item) => `
+                <span class="consensus-chip">${escapeHtml(item.display)} · ${escapeHtml(item.authorCount)} 个博主 · ${escapeHtml(item.postCount)} 条</span>
+              `).join("")}
+            </div>
+          </div>
+        ` : "";
         if (!posts.length) {
-          feedList.innerHTML = '<div class="empty">还没有推文结果。可从关注列表批量抓取，或在这里点击开始抓取。</div>';
+          feedList.innerHTML = `${consensusHtml}<div class="empty">还没有推文结果。可从关注列表批量抓取，或在这里点击开始抓取。</div>`;
           renderActivity(data);
           return;
         }
-        feedList.innerHTML = posts.map((post) => {
+        feedList.innerHTML = consensusHtml + posts.map((post) => {
           const handle = String(post.authorHandle || "").replace(/^@/, "");
           const watcher = state.watchers.find((item) => cleanHandle(item.handle).toLowerCase() === handle.toLowerCase());
           return `
@@ -747,6 +793,13 @@
                 <div class="tweet-time">${escapeHtml(formatDate(post.publishedAt))}</div>
               </div>
               <p class="tweet-text">${escapeHtml(post.text)}</p>
+              ${(post.consensusSignals || []).length ? `
+                <div class="tweet-badges">
+                  ${(post.consensusSignals || []).slice(0, 4).map((signal) => `
+                    <span class="tweet-badge consensus">共识 ${escapeHtml(signal.display)} · ${escapeHtml(signal.authorCount)} 博主</span>
+                  `).join("")}
+                </div>
+              ` : ""}
               ${(post.memeScore || post.memeReasons?.length) ? `
                 <div class="tweet-badges">
                   <span class="tweet-badge">meme 分数 ${escapeHtml(post.memeScore || 0)}</span>

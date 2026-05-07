@@ -463,6 +463,140 @@ function csvCell(value) {
   return `"${String(value ?? "").replaceAll('"', '""')}"`;
 }
 
+const EXCLUDED_SYMBOLS = new Set([
+  "BTC",
+  "ETH",
+  "BNB",
+  "SOL",
+  "USDT",
+  "USDC",
+  "USD",
+  "FDUSD",
+  "DAI",
+  "XRP",
+  "ADA",
+  "DOGE",
+  "TRX",
+  "TON",
+  "LINK",
+  "AVAX",
+  "DOT",
+  "MATIC",
+  "OP",
+  "ARB",
+  "SUI",
+  "APT"
+]);
+
+const KNOWN_MEME_ALIASES = [
+  { key: "PEPE", pattern: /\bpepe\b/i },
+  { key: "SHIB", pattern: /\bshib(?:a)?\b/i },
+  { key: "BONK", pattern: /\bbonk\b/i },
+  { key: "WIF", pattern: /\bwif\b|\bdogwifhat\b/i },
+  { key: "FLOKI", pattern: /\bfloki\b/i },
+  { key: "POPCAT", pattern: /\bpopcat\b/i },
+  { key: "MOG", pattern: /\bmog\b/i },
+  { key: "GIGA", pattern: /\bgiga\b/i },
+  { key: "FARTCOIN", pattern: /\bfartcoin\b/i }
+];
+
+function normalizeAuthor(value) {
+  return String(value || "").replace(/^@/, "").trim().toLowerCase();
+}
+
+function extractCoinMentions(post) {
+  const text = String(post?.text || "");
+  const mentions = new Map();
+
+  for (const match of text.matchAll(/\$([A-Za-z][A-Za-z0-9_]{1,11})\b/g)) {
+    const symbol = match[1].toUpperCase();
+    if (!EXCLUDED_SYMBOLS.has(symbol)) {
+      mentions.set(symbol, { key: symbol, type: "ticker", display: `$${symbol}` });
+    }
+  }
+
+  for (const alias of KNOWN_MEME_ALIASES) {
+    if (!EXCLUDED_SYMBOLS.has(alias.key) && alias.pattern.test(text)) {
+      mentions.set(alias.key, { key: alias.key, type: "alias", display: `$${alias.key}` });
+    }
+  }
+
+  for (const match of text.matchAll(/\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g)) {
+    const address = match[0];
+    if (/[A-Z]/.test(address) && /[a-z]/.test(address) && /\d/.test(address)) {
+      mentions.set(`CA:${address}`, { key: `CA:${address}`, type: "contract", display: `CA ${address.slice(0, 6)}...${address.slice(-4)}` });
+    }
+  }
+
+  for (const match of text.matchAll(/\b0x[a-fA-F0-9]{40}\b/g)) {
+    const address = match[0];
+    mentions.set(`CA:${address.toLowerCase()}`, { key: `CA:${address.toLowerCase()}`, type: "contract", display: `CA ${address.slice(0, 6)}...${address.slice(-4)}` });
+  }
+
+  return [...mentions.values()];
+}
+
+function applyCrossValidation(posts, minAuthors = 2) {
+  const byCoin = new Map();
+  for (const post of posts) {
+    const author = normalizeAuthor(post.authorHandle);
+    if (!author) continue;
+    const mentions = extractCoinMentions(post);
+    post.coinMentions = mentions;
+    for (const mention of mentions) {
+      if (!byCoin.has(mention.key)) {
+        byCoin.set(mention.key, {
+          key: mention.key,
+          display: mention.display,
+          type: mention.type,
+          authors: new Set(),
+          postIds: new Set(),
+          latestAt: null,
+          score: 0
+        });
+      }
+      const item = byCoin.get(mention.key);
+      item.authors.add(author);
+      item.postIds.add(String(post.id));
+      if (!item.latestAt || String(post.publishedAt || "") > item.latestAt) {
+        item.latestAt = post.publishedAt || null;
+      }
+    }
+  }
+
+  const consensus = [...byCoin.values()]
+    .filter((item) => item.authors.size >= minAuthors)
+    .map((item) => ({
+      key: item.key,
+      display: item.display,
+      type: item.type,
+      authorCount: item.authors.size,
+      postCount: item.postIds.size,
+      authors: [...item.authors].map((author) => `@${author}`),
+      postIds: [...item.postIds],
+      latestAt: item.latestAt,
+      score: item.authors.size * 10 + item.postIds.size
+    }))
+    .sort((left, right) => right.score - left.score || String(right.latestAt || "").localeCompare(String(left.latestAt || "")));
+
+  const consensusByKey = new Map(consensus.map((item) => [item.key, item]));
+  for (const post of posts) {
+    post.consensusSignals = (post.coinMentions || [])
+      .map((mention) => consensusByKey.get(mention.key))
+      .filter(Boolean)
+      .map((item) => ({
+        key: item.key,
+        display: item.display,
+        type: item.type,
+        authorCount: item.authorCount,
+        postCount: item.postCount,
+        authors: item.authors
+      }));
+  }
+
+  return consensus;
+}
+
 function uniqueUsernames(values) {
   const usernames = asArray(values).map(safeUsername);
   return [...new Set(usernames)].slice(0, 20);
@@ -725,6 +859,7 @@ async function collectWithBrowser(requestBody) {
 
   const posts = (batchRun?.payload?.posts ?? [])
     .sort((left, right) => String(right.publishedAt || "").localeCompare(String(left.publishedAt || "")));
+  const consensus = applyCrossValidation(posts, 2);
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const outputFile = path.join(dataDir, `browser-monitor-${timestamp}.json`);
   const csvFile = path.join(dataDir, `browser-monitor-${timestamp}.csv`);
@@ -736,12 +871,13 @@ async function collectWithBrowser(requestBody) {
     totalPosts: posts.length,
     totalScanned: Number(batchRun?.payload?.totalScanned || 0),
     accounts: batchRun?.payload?.accounts ?? [],
+    consensus,
     errors,
     posts
   };
   await fs.writeFile(outputFile, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
   const csvRows = [
-    ["id", "url", "authorHandle", "publishedAt", "text", "imageUrls", "videoPosters", "scrapedAt"].map(csvCell).join(","),
+    ["id", "url", "authorHandle", "publishedAt", "text", "coinMentions", "consensusSignals", "imageUrls", "videoPosters", "scrapedAt"].map(csvCell).join(","),
     ...posts.map((post) =>
       [
         post.id,
@@ -749,6 +885,8 @@ async function collectWithBrowser(requestBody) {
         post.authorHandle,
         post.publishedAt,
         post.text,
+        (post.coinMentions || []).map((item) => item.display).join(" "),
+        (post.consensusSignals || []).map((item) => item.display).join(" "),
         (post.imageUrls || []).join(" "),
         (post.videoPosters || []).join(" "),
         post.scrapedAt
