@@ -10,10 +10,6 @@ const projectRoot = path.resolve(__dirname, "..");
 const publicDir = path.join(projectRoot, "public");
 const configPath = path.join(projectRoot, "config", "bloggers.json");
 const dataDir = path.join(projectRoot, "data");
-const latestPath = path.join(dataDir, "latest.json");
-const latestBrowserPath = path.join(dataDir, "browser-latest.json");
-const latestBrowserHitPath = path.join(dataDir, "browser-latest-hit.json");
-const latestTelegramPath = path.join(dataDir, "telegram-latest.json");
 const defaultPort = Number(process.env.PORT || 48931);
 const appMode = process.env.APP_MODE === "analysis" ? "analysis" : "meme";
 const X_API_BASE = "https://api.x.com/2";
@@ -366,10 +362,37 @@ async function collect(requestBody) {
   const runId = new Date().toISOString().replace(/[:.]/g, "-");
   const outputFile = path.join(dataDir, `${runId}.json`);
   await fs.writeFile(outputFile, `${JSON.stringify(run, null, 2)}\n`, "utf8");
-  await fs.writeFile(latestPath, `${JSON.stringify(run, null, 2)}\n`, "utf8");
   return {
     ...run,
     outputFile
+  };
+}
+
+async function readLatestApiRun() {
+  await fs.mkdir(dataDir, { recursive: true });
+  const files = await fs.readdir(dataDir);
+  const runs = [];
+  for (const file of files) {
+    if (!/^\d{4}-\d{2}-\d{2}T.+\.json$/.test(file)) continue;
+    const filePath = path.join(dataDir, file);
+    const stat = await fs.stat(filePath);
+    runs.push({ file, path: filePath, modifiedAt: stat.mtime.toISOString() });
+  }
+  runs.sort((left, right) => right.modifiedAt.localeCompare(left.modifiedAt));
+  const [latest] = runs;
+  if (!latest) {
+    return {
+      generatedAt: null,
+      totalPosts: 0,
+      bloggers: [],
+      errors: [],
+      posts: []
+    };
+  }
+  return {
+    file: latest.file,
+    path: latest.path,
+    ...(JSON.parse(await fs.readFile(latest.path, "utf8")))
   };
 }
 
@@ -425,26 +448,6 @@ async function listBrowserRuns() {
 }
 
 async function readLatestBrowserRun() {
-  try {
-    const latestHit = JSON.parse(await fs.readFile(latestBrowserHitPath, "utf8"));
-    return {
-      file: path.basename(latestBrowserHitPath),
-      path: latestBrowserHitPath,
-      latestRun: JSON.parse(await fs.readFile(latestBrowserPath, "utf8")).generatedAt,
-      ...(latestHit)
-    };
-  } catch {
-    // Fall through to latest run.
-  }
-  try {
-    return {
-      file: path.basename(latestBrowserPath),
-      path: latestBrowserPath,
-      ...(JSON.parse(await fs.readFile(latestBrowserPath, "utf8")))
-    };
-  } catch {
-    // Fall through to historical monitor files.
-  }
   const [latest] = await listBrowserRuns();
   if (!latest) {
     return {
@@ -462,18 +465,36 @@ async function readLatestBrowserRun() {
 }
 
 async function readLatestTelegramRun() {
+  await fs.mkdir(dataDir, { recursive: true });
   try {
-    return JSON.parse(await fs.readFile(latestTelegramPath, "utf8"));
+    const files = await fs.readdir(dataDir);
+    const runs = [];
+    for (const file of files) {
+      if (!/^telegram-monitor-.+\.json$/.test(file)) continue;
+      const filePath = path.join(dataDir, file);
+      const stat = await fs.stat(filePath);
+      runs.push({ file, path: filePath, modifiedAt: stat.mtime.toISOString() });
+    }
+    runs.sort((left, right) => right.modifiedAt.localeCompare(left.modifiedAt));
+    const [latest] = runs;
+    if (latest) {
+      return {
+        file: latest.file,
+        path: latest.path,
+        ...(JSON.parse(await fs.readFile(latest.path, "utf8")))
+      };
+    }
   } catch {
-    return {
-      source: "telegram",
-      generatedAt: null,
-      totalPosts: 0,
-      accounts: [],
-      errors: [],
-      posts: []
-    };
+    // Fall through to an empty Telegram result.
   }
+  return {
+    source: "telegram",
+    generatedAt: null,
+    totalPosts: 0,
+    accounts: [],
+    errors: [],
+    posts: []
+  };
 }
 
 async function collectWithTelegram(requestBody) {
@@ -670,10 +691,6 @@ async function collectWithBrowser(requestBody) {
     posts
   };
   await fs.writeFile(outputFile, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  await fs.writeFile(latestBrowserPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  if (posts.length > 0) {
-    await fs.writeFile(latestBrowserHitPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  }
   const csvRows = [
     ["id", "url", "authorHandle", "publishedAt", "text", "imageUrls", "videoPosters", "scrapedAt"].map(csvCell).join(","),
     ...posts.map((post) =>
@@ -823,18 +840,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/latest") {
-      try {
-        const latest = JSON.parse(await fs.readFile(latestPath, "utf8"));
-        jsonResponse(response, 200, latest);
-      } catch {
-        jsonResponse(response, 200, {
-          generatedAt: null,
-          totalPosts: 0,
-          bloggers: [],
-          errors: [],
-          posts: []
-        });
-      }
+      jsonResponse(response, 200, await readLatestApiRun());
       return;
     }
 

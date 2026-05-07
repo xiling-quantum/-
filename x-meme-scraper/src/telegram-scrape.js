@@ -145,7 +145,6 @@ async function main() {
     };
 
     await fs.writeFile(jsonPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-    await fs.writeFile(path.join(dataDir, "telegram-latest.json"), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
     const csvRows = [
       ["id", "group", "publishedAt", "memeScore", "text", "url", "scrapedAt"].map(csvCell).join(","),
       ...posts.map((post) => [
