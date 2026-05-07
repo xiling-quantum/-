@@ -355,6 +355,11 @@ async function classifyPostsWithAI(posts, mode, minConfidence) {
 
 function dateMatches(value, startDate, endDate) {
   if (!startDate && !endDate) return true;
+  const relativeTime = String(value?.relativeText ?? value?.relativeTime ?? "").trim();
+  if (startDate && !endDate && /(\d+\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours)|\d+\s*(秒|分钟|小時|小时|时)|刚刚|现在)/i.test(relativeTime)) {
+    return true;
+  }
+  value = typeof value === "object" && value !== null ? value.publishedAt : value;
   if (!value) return false;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return false;
@@ -384,6 +389,35 @@ async function autoScroll(page, maxPosts, maxScrolls) {
   }
 }
 
+async function collectTimelinePosts(page, username, maxPosts, maxScrolls) {
+  const collected = new Map();
+  let previousCount = 0;
+  let staleRounds = 0;
+
+  for (let i = 0; i <= maxScrolls; i += 1) {
+    const posts = await extractPosts(page, username, Math.max(maxPosts, maxPosts * 3));
+    for (const post of posts) {
+      if (!collected.has(post.id)) collected.set(post.id, post);
+    }
+    if (collected.size >= maxPosts) break;
+    if (i === maxScrolls) break;
+
+    const count = await page.locator("article").count();
+    if (count === previousCount) {
+      staleRounds += 1;
+    } else {
+      staleRounds = 0;
+      previousCount = count;
+    }
+    if (staleRounds >= 4) break;
+
+    await page.mouse.wheel(0, 1800);
+    await page.waitForTimeout(1400);
+  }
+
+  return [...collected.values()];
+}
+
 async function waitForTimeline(page, username, articleTimeoutMs, retries) {
   let lastError = null;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
@@ -405,6 +439,28 @@ async function waitForTimeline(page, username, articleTimeoutMs, retries) {
     }
   }
   throw new Error(`Timed out waiting for @${username} timeline articles after ${(retries + 1) * articleTimeoutMs}ms. Last error: ${lastError?.message || "unknown"}`);
+}
+
+async function selectPostsTab(page) {
+  const tab = page
+    .locator('a[href$="/with_replies"], a[href$="/media"]')
+    .locator("xpath=../..")
+    .locator(`a[href^="/"]`)
+    .first();
+  await tab.click({ timeout: 3000 }).catch(() => {});
+}
+
+async function saveDebugSnapshot(page, username) {
+  if (argValue("debug", "false") !== "true") return;
+  await fs.mkdir(dataDir, { recursive: true });
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const textPath = path.join(dataDir, `debug-${username}-${timestamp}.txt`);
+  const pngPath = path.join(dataDir, `debug-${username}-${timestamp}.png`);
+  const bodyText = await page.locator("body").innerText({ timeout: 5000 }).catch((error) => error.message);
+  await fs.writeFile(textPath, bodyText, "utf8");
+  await page.screenshot({ path: pngPath, fullPage: false }).catch(() => {});
+  console.log(`DEBUG_TEXT: ${textPath}`);
+  console.log(`DEBUG_PNG:  ${pngPath}`);
 }
 
 async function extractPosts(page, username, maxPosts) {
@@ -440,6 +496,7 @@ async function extractPosts(page, username, maxPosts) {
           url: `https://x.com/${targetUsername}/status/${statusId}`,
           authorHandle: `@${targetUsername}`,
           publishedAt: time?.getAttribute("datetime") || null,
+          relativeTime: time?.innerText?.trim() || time?.textContent?.trim() || null,
           text,
           imageUrls: [...new Set(images)],
           videoPosters: [...new Set(videos)],
@@ -496,12 +553,14 @@ async function scrapeUser(context, username, options) {
     }
 
     await waitForTimeline(page, username, articleTimeoutMs, retries);
-    await autoScroll(page, maxPosts, maxScrolls);
+    await selectPostsTab(page);
+    await waitForTimeline(page, username, articleTimeoutMs, retries);
+    await saveDebugSnapshot(page, username);
 
-    const rawPosts = await extractPosts(page, username, Math.max(maxPosts, maxPosts * 3));
+    const rawPosts = await collectTimelinePosts(page, username, Math.max(maxPosts, maxPosts * 3), maxScrolls);
     let posts = rawPosts
       .filter((post) => textMatches(post.text, query))
-      .filter((post) => dateMatches(post.publishedAt, startDate, endDate))
+      .filter((post) => dateMatches(post, startDate, endDate))
       .map((post) => annotateScores(post));
 
     if (aiClassify) {
