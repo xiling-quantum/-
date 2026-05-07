@@ -420,10 +420,49 @@
 
       .tweet-media img {
         width: 100%;
-        height: 210px;
-        object-fit: cover;
+        max-height: 520px;
+        object-fit: contain;
         border-radius: 6px;
         display: block;
+        background: #fff;
+        cursor: zoom-in;
+      }
+
+      .media-lightbox {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(15, 23, 42, .86);
+        padding: 28px;
+      }
+
+      .media-lightbox.active {
+        display: flex;
+      }
+
+      .media-lightbox img {
+        max-width: min(1180px, 96vw);
+        max-height: 92vh;
+        object-fit: contain;
+        border-radius: 8px;
+        background: #fff;
+      }
+
+      .media-lightbox button {
+        position: fixed;
+        top: 18px;
+        right: 22px;
+        width: 42px;
+        height: 42px;
+        border: 0;
+        border-radius: 50%;
+        background: #fff;
+        color: #111827;
+        font-size: 24px;
+        cursor: pointer;
       }
 
       .activity-card {
@@ -624,6 +663,10 @@
         </section>
       </main>
     </div>
+    <div id="mediaLightbox" class="media-lightbox" aria-hidden="true">
+      <button id="mediaLightboxClose" type="button" aria-label="关闭">×</button>
+      <img id="mediaLightboxImage" alt="">
+    </div>
 
     <script type="module">
       const defaultWatchers = [
@@ -654,6 +697,9 @@
       const scrapeButton = document.getElementById("scrapeButton");
       const monitorInfo = document.getElementById("monitorInfo");
       const appTitle = document.getElementById("appTitle");
+      const mediaLightbox = document.getElementById("mediaLightbox");
+      const mediaLightboxImage = document.getElementById("mediaLightboxImage");
+      const mediaLightboxClose = document.getElementById("mediaLightboxClose");
       let appInfo = { mode: "meme" };
 
       function loadLocalWatchers() {
@@ -714,6 +760,27 @@
       function formatDate(value) {
         if (!value) return "-";
         return new Date(value).toLocaleString();
+      }
+
+      function mediaImages(post) {
+        return (post.imageUrls || []).filter((src) =>
+          src
+          && !src.includes("abs.twimg.com/emoji")
+          && !src.includes("/hashflags/")
+          && !src.includes("profile_images")
+        );
+      }
+
+      function openMedia(src) {
+        mediaLightboxImage.src = src;
+        mediaLightbox.classList.add("active");
+        mediaLightbox.setAttribute("aria-hidden", "false");
+      }
+
+      function closeMedia() {
+        mediaLightbox.classList.remove("active");
+        mediaLightbox.setAttribute("aria-hidden", "true");
+        mediaLightboxImage.removeAttribute("src");
       }
 
       function initials(item) {
@@ -780,6 +847,7 @@
         feedList.innerHTML = consensusHtml + posts.map((post) => {
           const handle = String(post.authorHandle || "").replace(/^@/, "");
           const watcher = state.watchers.find((item) => cleanHandle(item.handle).toLowerCase() === handle.toLowerCase());
+          const images = mediaImages(post);
           return `
             <article class="tweet-card">
               <div class="tweet-top">
@@ -827,9 +895,9 @@
                   <span class="tweet-badge">${escapeHtml(post.aiClassification.reason)}</span>
                 </div>
               ` : ""}
-              ${(post.imageUrls || []).length ? `
+              ${images.length ? `
                 <div class="tweet-media">
-                  ${(post.imageUrls || []).slice(0, 4).map((src) => `<img src="${escapeHtml(src)}" alt="">`).join("")}
+                  ${images.slice(0, 4).map((src) => `<img src="${escapeHtml(src)}" alt="" data-media-src="${escapeHtml(src)}" loading="lazy" onerror="this.remove()">`).join("")}
                 </div>
               ` : ""}
             </article>
@@ -1064,6 +1132,21 @@
       document.getElementById("runNowButton").addEventListener("click", async () => {
         await fetch("/api/monitor/run-now", { method: "POST" });
         await pollStatus();
+      });
+
+      feedList.addEventListener("click", (event) => {
+        const src = event.target?.dataset?.mediaSrc;
+        if (src) openMedia(src);
+      });
+
+      mediaLightbox.addEventListener("click", (event) => {
+        if (event.target === mediaLightbox) closeMedia();
+      });
+
+      mediaLightboxClose.addEventListener("click", closeMedia);
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeMedia();
       });
 
       await loadAppInfo();

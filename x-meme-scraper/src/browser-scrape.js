@@ -485,7 +485,13 @@ async function extractPosts(page, username, maxPosts) {
 
         const images = [...article.querySelectorAll("img")]
           .map((img) => img.src)
-          .filter((src) => src && !src.includes("profile_images"));
+          .filter((src) =>
+            src
+            && !src.includes("profile_images")
+            && !src.includes("abs.twimg.com/emoji")
+            && !src.includes("/hashflags/")
+            && !src.startsWith("data:")
+          );
 
         const videos = [...article.querySelectorAll("video")]
           .map((video) => video.poster || video.currentSrc || video.src)
