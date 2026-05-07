@@ -1,0 +1,40 @@
+{
+  "watchers": [
+    {
+      "name": "Yi He",
+      "handle": "heyibinance",
+      "note": "Binance",
+      "selected": true
+    },
+    {
+      "name": "CZ",
+      "handle": "cz_binance",
+      "note": "Binance",
+      "selected": true
+    },
+    {
+      "name": "MustStopMurad",
+      "handle": "MustStopMurad",
+      "note": "Meme KOL",
+      "selected": true
+    },
+    {
+      "name": "Degenerate News",
+      "handle": "DegenerateNews",
+      "note": "Crypto news",
+      "selected": true
+    },
+    {
+      "name": "Lookonchain",
+      "handle": "lookonchain",
+      "note": "On-chain",
+      "selected": true
+    },
+    {
+      "name": "币安Binance华语",
+      "handle": "binancezh",
+      "note": "中文",
+      "selected": true
+    }
+  ]
+}

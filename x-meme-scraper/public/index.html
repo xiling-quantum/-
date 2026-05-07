@@ -601,7 +601,7 @@
       ];
 
       const state = {
-        watchers: loadWatchers(),
+        watchers: defaultWatchers.map((item) => ({ ...item, selected: true })),
         latest: null
       };
 
@@ -621,16 +621,40 @@
       const appTitle = document.getElementById("appTitle");
       let appInfo = { mode: "meme" };
 
-      function loadWatchers() {
+      function loadLocalWatchers() {
         try {
           const saved = JSON.parse(localStorage.getItem("x-monitor-watchers") || "null");
           if (Array.isArray(saved) && saved.length) return saved;
         } catch {}
-        return defaultWatchers.map((item) => ({ ...item, selected: true }));
+        return null;
       }
 
-      function saveWatchers() {
+      async function loadWatchers() {
+        try {
+          const response = await fetch("/api/watchers");
+          const payload = await response.json();
+          if (Array.isArray(payload.watchers) && payload.watchers.length) {
+            state.watchers = payload.watchers;
+          }
+          const localWatchers = loadLocalWatchers();
+          if (localWatchers?.length && !localStorage.getItem("x-monitor-watchers-migrated")) {
+            state.watchers = localWatchers;
+            await saveWatchers();
+            localStorage.setItem("x-monitor-watchers-migrated", "1");
+          }
+        } catch {
+          const localWatchers = loadLocalWatchers();
+          if (localWatchers?.length) state.watchers = localWatchers;
+        }
+      }
+
+      async function saveWatchers() {
         localStorage.setItem("x-monitor-watchers", JSON.stringify(state.watchers));
+        await fetch("/api/watchers", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ watchers: state.watchers })
+        });
       }
 
       function escapeHtml(value) {
@@ -903,45 +927,45 @@
       });
 
       document.getElementById("addButton").addEventListener("click", () => newHandle.focus());
-      document.getElementById("addConfirmButton").addEventListener("click", () => {
+      document.getElementById("addConfirmButton").addEventListener("click", async () => {
         const handle = cleanHandle(newHandle.value);
         if (!handle) return;
         if (!state.watchers.some((item) => cleanHandle(item.handle).toLowerCase() === handle.toLowerCase())) {
           state.watchers.unshift({ name: handle, handle, note: newNote.value.trim(), selected: true });
-          saveWatchers();
+          await saveWatchers();
           renderWatchers();
         }
         newHandle.value = "";
         newNote.value = "";
       });
 
-      watchRows.addEventListener("change", (event) => {
+      watchRows.addEventListener("change", async (event) => {
         const index = event.target.dataset.select;
         if (index === undefined) return;
         state.watchers[Number(index)].selected = event.target.checked;
-        saveWatchers();
+        await saveWatchers();
         renderWatchers();
       });
 
-      watchRows.addEventListener("click", (event) => {
+      watchRows.addEventListener("click", async (event) => {
         const index = event.target.dataset.delete;
         if (index === undefined) return;
         state.watchers.splice(Number(index), 1);
-        saveWatchers();
+        await saveWatchers();
         renderWatchers();
       });
 
-      headerCheck.addEventListener("change", () => {
+      headerCheck.addEventListener("change", async () => {
         state.watchers.forEach((item) => { item.selected = headerCheck.checked; });
-        saveWatchers();
+        await saveWatchers();
         renderWatchers();
       });
 
-      document.getElementById("selectAllButton").addEventListener("click", () => {
+      document.getElementById("selectAllButton").addEventListener("click", async () => {
         const allSelected = state.watchers.every((item) => item.selected);
         state.watchers.forEach((item) => { item.selected = !allSelected; });
         headerCheck.checked = !allSelected;
-        saveWatchers();
+        await saveWatchers();
         renderWatchers();
       });
 
@@ -983,6 +1007,7 @@
       });
 
       await loadAppInfo();
+      await loadWatchers();
       renderWatchers();
       await loadLatest();
       await loadMonitorStatus();

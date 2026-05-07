@@ -9,6 +9,7 @@ const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..");
 const publicDir = path.join(projectRoot, "public");
 const configPath = path.join(projectRoot, "config", "bloggers.json");
+const watchersPath = path.join(projectRoot, "config", "watchers.json");
 const dataDir = path.join(projectRoot, "data");
 const defaultPort = Number(process.env.PORT || 48931);
 const appMode = process.env.APP_MODE === "analysis" ? "analysis" : "meme";
@@ -113,6 +114,54 @@ async function readRequestJson(request) {
 async function readConfig() {
   const raw = await fs.readFile(configPath, "utf8");
   return JSON.parse(raw);
+}
+
+const defaultWatchers = [
+  { name: "Yi He", handle: "heyibinance", note: "Binance", selected: true },
+  { name: "CZ", handle: "cz_binance", note: "Binance", selected: true },
+  { name: "MustStopMurad", handle: "MustStopMurad", note: "Meme KOL", selected: true },
+  { name: "Degenerate News", handle: "DegenerateNews", note: "Crypto news", selected: true },
+  { name: "Lookonchain", handle: "lookonchain", note: "On-chain", selected: true },
+  { name: "币安Binance华语", handle: "binancezh", note: "中文", selected: true }
+];
+
+function normalizeWatcher(item) {
+  const handle = normalizeUsername(item?.handle);
+  if (!/^[a-zA-Z0-9_]{1,15}$/.test(handle)) return null;
+  return {
+    name: String(item?.name || handle).trim().slice(0, 80),
+    handle,
+    note: String(item?.note || "").trim().slice(0, 120),
+    selected: item?.selected !== false
+  };
+}
+
+async function readWatchers() {
+  try {
+    const saved = JSON.parse(await fs.readFile(watchersPath, "utf8"));
+    const watchers = (Array.isArray(saved) ? saved : saved.watchers)
+      .map(normalizeWatcher)
+      .filter(Boolean);
+    if (watchers.length) return watchers;
+  } catch {
+    // Fall through to defaults.
+  }
+  return defaultWatchers.map((item) => ({ ...item }));
+}
+
+async function writeWatchers(watchers) {
+  const normalized = watchers.map(normalizeWatcher).filter(Boolean);
+  const unique = [];
+  const seen = new Set();
+  for (const watcher of normalized) {
+    const key = watcher.handle.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(watcher);
+  }
+  await fs.mkdir(path.dirname(watchersPath), { recursive: true });
+  await fs.writeFile(watchersPath, `${JSON.stringify({ watchers: unique }, null, 2)}\n`, "utf8");
+  return unique;
 }
 
 function normalizeUsername(value) {
@@ -836,6 +885,20 @@ const server = http.createServer(async (request, response) => {
         ...config,
         hasEnvToken: Boolean(process.env.X_BEARER_TOKEN)
       });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/watchers") {
+      jsonResponse(response, 200, {
+        watchers: await readWatchers()
+      });
+      return;
+    }
+
+    if (request.method === "PUT" && url.pathname === "/api/watchers") {
+      const requestBody = await readRequestJson(request);
+      const watchers = await writeWatchers(asArray(requestBody?.watchers).length ? requestBody.watchers : []);
+      jsonResponse(response, 200, { watchers });
       return;
     }
 
