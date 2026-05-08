@@ -4,6 +4,9 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
+import { loadLocalEnv } from "./local-env.js";
+
+loadLocalEnv();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

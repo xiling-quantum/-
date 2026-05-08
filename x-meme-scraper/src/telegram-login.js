@@ -2,6 +2,9 @@ import process from "node:process";
 import input from "input";
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
+import { loadLocalEnv } from "./local-env.js";
+
+loadLocalEnv();
 
 const apiId = Number(process.env.TELEGRAM_API_ID || 0);
 const apiHash = String(process.env.TELEGRAM_API_HASH || "").trim();
