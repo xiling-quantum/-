@@ -800,7 +800,9 @@
                     <input id="telegramQuery" placeholder="可留空">
                   </label>
                   <label><input id="telegramMemeOnly" type="checkbox" checked> 只抓 meme 内容</label>
-                  <button id="telegramScrapeButton" class="primary" type="button">开始抓取</button>
+                  <button id="telegramLiveStartButton" class="green" type="button">启动实时监控</button>
+                  <button id="telegramLiveStopButton" class="ghost" type="button">停止监控</button>
+                  <button id="telegramScrapeButton" class="primary" type="button">立即手动抓取</button>
                   <button id="telegramLoadButton" class="ghost" type="button">刷新结果</button>
                 </div>
                 <div id="telegramMessage" class="status-box good">Telegram 服务已就绪。</div>
@@ -850,6 +852,8 @@
       const telegramList = document.getElementById("telegramList");
       const telegramMessage = document.getElementById("telegramMessage");
       const telegramScrapeButton = document.getElementById("telegramScrapeButton");
+      const telegramLiveStartButton = document.getElementById("telegramLiveStartButton");
+      const telegramLiveStopButton = document.getElementById("telegramLiveStopButton");
       const telegramGroupRows = document.getElementById("telegramGroupRows");
       const telegramHeaderCheck = document.getElementById("telegramHeaderCheck");
       const telegramGroupSearch = document.getElementById("telegramGroupSearch");
@@ -1218,7 +1222,7 @@
         const posts = data?.posts || [];
         document.getElementById("telegramStatus").textContent = `最近结果：${posts.length} 条 · ${formatDate(data?.generatedAt)}`;
         if (!posts.length) {
-          telegramList.innerHTML = '<div class="empty">还没有 Telegram 结果。输入群或频道后点击开始抓取。</div>';
+          telegramList.innerHTML = '<div class="empty">还没有 Telegram 结果。勾选频道后可启动实时监控，或立即手动抓取。</div>';
           return;
         }
         telegramList.innerHTML = posts.map((post) => {
@@ -1276,6 +1280,37 @@
         return data;
       }
 
+      async function loadTelegramLiveLatest() {
+        const response = await fetch(`/api/telegram/live/latest?t=${Date.now()}`, { cache: "no-store" });
+        const data = await response.json();
+        renderTelegram(data);
+        return data;
+      }
+
+      async function loadTelegramLiveStatus() {
+        const response = await fetch(`/api/telegram/live/status?t=${Date.now()}`, { cache: "no-store" });
+        const status = await response.json();
+        const running = Boolean(status.running);
+        telegramLiveStartButton.disabled = running;
+        telegramLiveStopButton.disabled = !running;
+        if (running) {
+          document.getElementById("telegramStatus").textContent =
+            `实时监听中 · ${escapeHtml(status.targetCount || 0)} 个频道 · 收到 ${escapeHtml(status.received || 0)} 条 · 命中 ${escapeHtml(status.matched || 0)} 条`;
+          setTelegramStatus(`Telegram 实时监控运行中。最后消息：${formatDate(status.lastMessageAt)}`, status.error ? "warn" : "good");
+          return status;
+        }
+        if (status.status === "failed") {
+          setTelegramStatus(`Telegram 实时监控失败：${status.error || "未知错误"}`, "bad");
+          return status;
+        }
+        if (status.status === "stopping") {
+          setTelegramStatus("Telegram 实时监控正在停止...", "warn");
+          return status;
+        }
+        setTelegramStatus("Telegram 实时监控未启动。", "good");
+        return status;
+      }
+
       async function pollTelegramStatus() {
         const response = await fetch(`/api/telegram/status?t=${Date.now()}`, { cache: "no-store" });
         const status = await response.json();
@@ -1318,6 +1353,33 @@
           return;
         }
         await pollTelegramStatus();
+      }
+
+      async function startTelegramLive() {
+        const config = readTelegramConfig();
+        if (!config.groups.length) {
+          setTelegramStatus("请先勾选至少一个 Telegram 群或频道。", "bad");
+          return;
+        }
+        saveTelegramForm();
+        setTelegramStatus("正在启动 Telegram 实时监控...", "warn");
+        const response = await fetch("/api/telegram/live/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(config)
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          setTelegramStatus(payload.message || payload.error || "Telegram 实时监控启动失败", "bad");
+          return;
+        }
+        await loadTelegramLiveStatus();
+        await loadTelegramLiveLatest();
+      }
+
+      async function stopTelegramLive() {
+        await fetch("/api/telegram/live/stop", { method: "POST" });
+        await loadTelegramLiveStatus();
       }
 
       function renderTelegramGroups() {
@@ -1556,7 +1618,9 @@
 
       scrapeButton.addEventListener("click", () => startScrape(handlesForScrape()));
       telegramScrapeButton.addEventListener("click", startTelegramScrape);
-      document.getElementById("telegramLoadButton").addEventListener("click", loadTelegramLatest);
+      telegramLiveStartButton.addEventListener("click", startTelegramLive);
+      telegramLiveStopButton.addEventListener("click", stopTelegramLive);
+      document.getElementById("telegramLoadButton").addEventListener("click", loadTelegramLiveLatest);
       document.getElementById("telegramAddButton").addEventListener("click", async () => {
         const target = cleanTelegramTarget(newTelegramTarget.value);
         if (!target) {
@@ -1676,7 +1740,8 @@
       renderTelegramGroups();
       await loadHistoryDates();
       await loadFeedForSelectedDate();
-      await loadTelegramLatest();
+      await loadTelegramLiveStatus();
+      await loadTelegramLiveLatest();
       await loadMonitorStatus();
       await pollStatus();
       setInterval(async () => {
@@ -1684,6 +1749,10 @@
         if (historyDateSelect.value === "__latest__") await loadLatest();
         await loadMonitorStatus();
       }, 5000);
+      setInterval(async () => {
+        const status = await loadTelegramLiveStatus();
+        if (status.running) await loadTelegramLiveLatest();
+      }, 3000);
     </script>
   </body>
 </html>

@@ -67,6 +67,20 @@ let lastTelegramRun = {
   stdout: "",
   stderr: ""
 };
+let activeTelegramLive = null;
+let lastTelegramLive = {
+  status: "idle",
+  startedAt: null,
+  stoppedAt: null,
+  targets: [],
+  targetCount: 0,
+  received: 0,
+  matched: 0,
+  lastMessageAt: null,
+  error: null,
+  stdout: "",
+  stderr: ""
+};
 let monitorTimer = null;
 let monitorConfig = null;
 let monitorState = {
@@ -1007,6 +1021,26 @@ async function readLatestTelegramRun() {
   };
 }
 
+async function readLatestTelegramLiveRun() {
+  const livePath = path.join(dataDir, "telegram-live-latest.json");
+  try {
+    return {
+      file: path.basename(livePath),
+      path: livePath,
+      ...(JSON.parse(await fs.readFile(livePath, "utf8")))
+    };
+  } catch {
+    return {
+      source: "telegram-live",
+      generatedAt: null,
+      totalPosts: 0,
+      accounts: [],
+      errors: [],
+      posts: []
+    };
+  }
+}
+
 async function collectWithTelegram(requestBody) {
   const groups = asArray(requestBody?.groups).map((item) => String(item).trim()).filter(Boolean);
   const maxMessages = boundedNumber(requestBody?.maxMessages, 50, 1, 200);
@@ -1065,6 +1099,149 @@ async function collectWithTelegram(requestBody) {
       }
     });
   });
+}
+
+function telegramLiveSnapshot() {
+  return {
+    running: Boolean(activeTelegramLive),
+    ...lastTelegramLive
+  };
+}
+
+function parseTelegramLiveEvent(line) {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
+}
+
+async function startTelegramLive(requestBody) {
+  const groups = asArray(requestBody?.groups).map((item) => String(item).trim()).filter(Boolean);
+  const query = String(requestBody?.query ?? "").trim();
+  const memeOnly = Boolean(requestBody?.memeOnly);
+  const memeMinScore = boundedNumber(requestBody?.memeMinScore, 2, 1, 8);
+  const scriptPath = path.join(projectRoot, "src", "telegram-live.js");
+  const args = [
+    scriptPath,
+    "--memeOnly",
+    String(memeOnly),
+    "--memeMinScore",
+    String(memeMinScore),
+    "--maxLatest",
+    "500"
+  ];
+  if (groups.length) args.push("--groups", groups.join(","));
+  if (query) args.push("--query", query);
+
+  lastTelegramLive = {
+    status: "starting",
+    startedAt: new Date().toISOString(),
+    stoppedAt: null,
+    targets: groups,
+    targetCount: groups.length,
+    received: 0,
+    matched: 0,
+    lastMessageAt: null,
+    error: null,
+    stdout: "",
+    stderr: ""
+  };
+
+  const child = spawn(process.execPath, args, {
+    cwd: projectRoot,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: process.env
+  });
+  activeTelegramLive = child;
+
+  let stdoutRemainder = "";
+  child.stdout.on("data", (chunk) => {
+    const text = chunk.toString("utf8");
+    lastTelegramLive.stdout += text;
+    stdoutRemainder += text;
+    const lines = stdoutRemainder.split(/\r?\n/);
+    stdoutRemainder = lines.pop() || "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const event = parseTelegramLiveEvent(line.trim());
+      if (!event) continue;
+      if (event.type === "ready") {
+        lastTelegramLive = {
+          ...lastTelegramLive,
+          status: "running",
+          targets: event.targets || lastTelegramLive.targets,
+          targetCount: Number(event.resolvedTargets || event.targets?.length || lastTelegramLive.targetCount || 0),
+          error: event.errors?.length ? `${event.errors.length} Telegram targets failed` : null
+        };
+      }
+      if (event.type === "message") {
+        lastTelegramLive = {
+          ...lastTelegramLive,
+          status: "running",
+          received: Number(event.received || lastTelegramLive.received || 0),
+          matched: Number(event.matched || lastTelegramLive.matched || 0),
+          lastMessageAt: event.publishedAt || event.at || new Date().toISOString()
+        };
+      }
+      if (event.type === "target-error" || event.type === "handler-error") {
+        lastTelegramLive = {
+          ...lastTelegramLive,
+          error: event.message || lastTelegramLive.error
+        };
+      }
+      if (event.type === "fatal") {
+        lastTelegramLive = {
+          ...lastTelegramLive,
+          status: "failed",
+          error: event.message || "Telegram live monitor failed"
+        };
+      }
+    }
+  });
+  child.stderr.on("data", (chunk) => {
+    lastTelegramLive.stderr += chunk.toString("utf8");
+  });
+  child.on("error", (error) => {
+    lastTelegramLive = {
+      ...lastTelegramLive,
+      status: "failed",
+      stoppedAt: new Date().toISOString(),
+      error: error.message
+    };
+    activeTelegramLive = null;
+  });
+  child.on("close", (code) => {
+    const wasStopping = lastTelegramLive.status === "stopping" || lastTelegramLive.status === "stopped";
+    const failed = !wasStopping && code !== 0;
+    lastTelegramLive = {
+      ...lastTelegramLive,
+      status: failed ? "failed" : "stopped",
+      stoppedAt: new Date().toISOString(),
+      error: failed ? (lastTelegramLive.error || `Telegram live monitor exited with ${code}`) : lastTelegramLive.error
+    };
+    activeTelegramLive = null;
+  });
+
+  return telegramLiveSnapshot();
+}
+
+function stopTelegramLive() {
+  if (activeTelegramLive) {
+    lastTelegramLive = {
+      ...lastTelegramLive,
+      status: "stopping"
+    };
+    activeTelegramLive.kill();
+  } else if (lastTelegramLive.status === "running" || lastTelegramLive.status === "starting") {
+    lastTelegramLive = {
+      ...lastTelegramLive,
+      status: "stopped",
+      stoppedAt: new Date().toISOString()
+    };
+  }
+  return telegramLiveSnapshot();
 }
 
 async function collectWithBrowser(requestBody) {
@@ -1424,6 +1601,35 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/telegram/latest") {
       jsonResponse(response, 200, await readLatestTelegramRun());
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/telegram/live/status") {
+      jsonResponse(response, 200, telegramLiveSnapshot());
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/telegram/live/latest") {
+      jsonResponse(response, 200, await readLatestTelegramLiveRun());
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/telegram/live/start") {
+      if (activeTelegramLive) {
+        jsonResponse(response, 409, {
+          running: true,
+          message: "Telegram live monitor is already running",
+          ...telegramLiveSnapshot()
+        });
+        return;
+      }
+      const requestBody = await readRequestJson(request);
+      jsonResponse(response, 202, await startTelegramLive(requestBody));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/telegram/live/stop") {
+      jsonResponse(response, 200, stopTelegramLive());
       return;
     }
 

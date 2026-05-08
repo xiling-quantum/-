@@ -13,7 +13,8 @@
     "x:import-cookies": "node ./src/import-x-cookies.js",
     "telegram:login": "node ./src/telegram-login.js",
     "telegram:scrape": "node ./src/telegram-scrape.js",
-    "check": "node --check ./src/server.js && node --check ./src/browser-scrape.js && node --check ./src/import-x-cookies.js && node --check ./src/telegram-login.js && node --check ./src/telegram-scrape.js"
+    "telegram:live": "node ./src/telegram-live.js",
+    "check": "node --check ./src/server.js && node --check ./src/browser-scrape.js && node --check ./src/import-x-cookies.js && node --check ./src/telegram-login.js && node --check ./src/telegram-scrape.js && node --check ./src/telegram-live.js"
   },
   "dependencies": {
     "input": "^1.0.1",
