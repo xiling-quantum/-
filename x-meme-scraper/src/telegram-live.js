@@ -29,12 +29,22 @@ function listArg(name) {
   return raw.split(",").map((item) => normalizeTarget(item)).filter(Boolean);
 }
 
+function senderArg(name) {
+  const raw = String(argValue(name, "") ?? "").trim();
+  if (!raw) return [];
+  return raw.split(",").map((item) => normalizeSenderFilter(item)).filter(Boolean);
+}
+
 function normalizeTarget(value) {
   return String(value ?? "")
     .trim()
     .replace(/^https?:\/\/t\.me\//i, "")
     .replace(/^@+/, "")
     .split(/[?#]/)[0];
+}
+
+function normalizeSenderFilter(value) {
+  return String(value ?? "").trim().replace(/^@+/, "");
 }
 
 function textMatches(text, query) {
@@ -122,6 +132,44 @@ async function resolveChatLabel(message, fallback) {
   }
 }
 
+async function resolveSenderFilters(client, values) {
+  const ids = new Set();
+  const unresolved = [];
+  for (const value of values.map(normalizeSenderFilter).filter(Boolean)) {
+    if (/^-?\d+$/.test(value)) {
+      ids.add(value);
+      continue;
+    }
+    try {
+      const entity = await client.getEntity(value);
+      if (entity?.id !== undefined) {
+        const id = String(entity.id);
+        ids.add(id);
+        ids.add(`-100${id}`);
+      } else {
+        unresolved.push(value);
+      }
+    } catch {
+      unresolved.push(value);
+    }
+  }
+  return { ids, unresolved };
+}
+
+async function messageSenderInfo(message) {
+  const senderId = message?.senderId !== undefined ? String(message.senderId) : "";
+  try {
+    const sender = typeof message?.getSender === "function" ? await message.getSender() : null;
+    return {
+      senderId,
+      senderUsername: sender?.username || "",
+      senderName: [sender?.firstName, sender?.lastName].filter(Boolean).join(" ")
+    };
+  } catch {
+    return { senderId, senderUsername: "", senderName: "" };
+  }
+}
+
 async function persistPost(post, targets, filters, maxLatest) {
   const latest = await readJsonFile(latestPath, emptyPayload(targets, filters));
   const latestIds = new Set((latest.posts || []).map((item) => item.key || `telegram:${item.group}:${item.id}`));
@@ -191,8 +239,9 @@ async function main() {
   const memeOnly = argValue("memeOnly", "false") === "true";
   const memeMinScore = Math.max(1, Math.min(8, Number(argValue("memeMinScore", "2")) || 2));
   const maxLatest = Math.max(50, Math.min(1000, Number(argValue("maxLatest", "500")) || 500));
+  const senderFilters = senderArg("senders");
   const targets = await readTargets();
-  const filters = { query, memeOnly, memeMinScore, maxLatest };
+  const filters = { query, memeOnly, memeMinScore, maxLatest, senderFilters, senderIds: [], unresolvedSenders: [] };
 
   if (!apiId || !apiHash || !stringSession) {
     throw new Error("Set TELEGRAM_API_ID, TELEGRAM_API_HASH, and TELEGRAM_STRING_SESSION before live monitoring Telegram.");
@@ -209,6 +258,9 @@ async function main() {
     proxy
   });
   await client.connect();
+  const resolvedSenders = await resolveSenderFilters(client, senderFilters);
+  filters.senderIds = [...resolvedSenders.ids];
+  filters.unresolvedSenders = resolvedSenders.unresolved;
 
   const entities = [];
   const targetByPeer = new Map();
@@ -241,6 +293,8 @@ async function main() {
       received += 1;
       const message = event.message;
       const text = message?.message || "";
+      const sender = await messageSenderInfo(message);
+      if (resolvedSenders.ids.size && !resolvedSenders.ids.has(sender.senderId)) return;
       if (!textMatches(text, query)) return;
       const score = memeScore(text);
       if (memeOnly && score < memeMinScore) return;
@@ -259,6 +313,9 @@ async function main() {
         platform: "telegram",
         group,
         authorHandle: group,
+        senderId: sender.senderId,
+        senderUsername: sender.senderUsername,
+        senderName: sender.senderName,
         publishedAt: message.date ? new Date(message.date * 1000).toISOString() : new Date().toISOString(),
         text,
         memeScore: score,

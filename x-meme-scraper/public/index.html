@@ -799,6 +799,9 @@
                   <label>内容包含
                     <input id="telegramQuery" placeholder="可留空">
                   </label>
+                  <label>发送者用户名/ID
+                    <input id="telegramSenders" placeholder="@username 或 user_id，可留空">
+                  </label>
                   <label><input id="telegramMemeOnly" type="checkbox" checked> 只抓 meme 内容</label>
                   <button id="telegramLiveStartButton" class="green" type="button">启动实时监控</button>
                   <button id="telegramLiveStopButton" class="ghost" type="button">停止监控</button>
@@ -1235,6 +1238,9 @@
                   <div>
                     <strong>${escapeHtml(group)}</strong>
                     <div class="handle">Telegram · ${escapeHtml(post.url || "")}</div>
+                    ${(post.senderId || post.senderUsername || post.senderName) ? `
+                      <div class="tiny">发送者 ID ${escapeHtml(post.senderId || "-")}${post.senderUsername ? ` · @${escapeHtml(post.senderUsername)}` : ""}${post.senderName ? ` · ${escapeHtml(post.senderName)}` : ""}</div>
+                    ` : ""}
                   </div>
                 </div>
                 <div class="tweet-time">${escapeHtml(formatDate(post.publishedAt))}</div>
@@ -1253,6 +1259,7 @@
           groups: selectedTelegramGroups(),
           maxMessages: Number(document.getElementById("telegramMaxMessages").value),
           query: document.getElementById("telegramQuery").value.trim(),
+          senders: document.getElementById("telegramSenders").value.split(",").map((item) => item.trim()).filter(Boolean),
           memeOnly: document.getElementById("telegramMemeOnly").checked,
           memeMinScore: Number(document.getElementById("telegramMemeMinScore").value)
         };
@@ -1268,6 +1275,7 @@
           if (!saved) return;
           document.getElementById("telegramMaxMessages").value = String(saved.maxMessages || 50);
           document.getElementById("telegramQuery").value = saved.query || "";
+          document.getElementById("telegramSenders").value = (saved.senders || []).join(",");
           document.getElementById("telegramMemeOnly").checked = saved.memeOnly !== false;
           document.getElementById("telegramMemeMinScore").value = String(saved.memeMinScore || 2);
         } catch {}
@@ -1668,7 +1676,7 @@
         await saveTelegramGroups();
         renderTelegramGroups();
       });
-      ["telegramMaxMessages", "telegramQuery", "telegramMemeOnly", "telegramMemeMinScore"].forEach((id) => {
+      ["telegramMaxMessages", "telegramQuery", "telegramSenders", "telegramMemeOnly", "telegramMemeMinScore"].forEach((id) => {
         document.getElementById(id).addEventListener("change", saveTelegramForm);
       });
 

@@ -1045,6 +1045,7 @@ async function collectWithTelegram(requestBody) {
   const groups = asArray(requestBody?.groups).map((item) => String(item).trim()).filter(Boolean);
   const maxMessages = boundedNumber(requestBody?.maxMessages, 50, 1, 200);
   const query = String(requestBody?.query ?? "").trim();
+  const senders = asArray(requestBody?.senders).map((item) => String(item).trim()).filter(Boolean);
   const memeOnly = Boolean(requestBody?.memeOnly);
   const memeMinScore = boundedNumber(requestBody?.memeMinScore, 2, 1, 8);
   const scriptPath = path.join(projectRoot, "src", "telegram-scrape.js");
@@ -1059,6 +1060,7 @@ async function collectWithTelegram(requestBody) {
   ];
   if (groups.length) args.push("--groups", groups.join(","));
   if (query) args.push("--query", query);
+  if (senders.length) args.push("--senders", senders.join(","));
 
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, {
@@ -1119,6 +1121,7 @@ function parseTelegramLiveEvent(line) {
 async function startTelegramLive(requestBody) {
   const groups = asArray(requestBody?.groups).map((item) => String(item).trim()).filter(Boolean);
   const query = String(requestBody?.query ?? "").trim();
+  const senders = asArray(requestBody?.senders).map((item) => String(item).trim()).filter(Boolean);
   const memeOnly = Boolean(requestBody?.memeOnly);
   const memeMinScore = boundedNumber(requestBody?.memeMinScore, 2, 1, 8);
   const scriptPath = path.join(projectRoot, "src", "telegram-live.js");
@@ -1133,6 +1136,7 @@ async function startTelegramLive(requestBody) {
   ];
   if (groups.length) args.push("--groups", groups.join(","));
   if (query) args.push("--query", query);
+  if (senders.length) args.push("--senders", senders.join(","));
 
   lastTelegramLive = {
     status: "starting",

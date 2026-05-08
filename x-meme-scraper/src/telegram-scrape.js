@@ -31,6 +31,10 @@ function listArg(name) {
   return raw.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
+function normalizeSenderFilter(value) {
+  return String(value ?? "").trim().replace(/^@+/, "");
+}
+
 function normalizeTarget(value) {
   return String(value ?? "")
     .trim()
@@ -74,6 +78,44 @@ function messageUrl(target, id) {
   return clean ? `https://t.me/${clean}/${id}` : null;
 }
 
+async function resolveSenderFilters(client, values) {
+  const ids = new Set();
+  const unresolved = [];
+  for (const value of values.map(normalizeSenderFilter).filter(Boolean)) {
+    if (/^-?\d+$/.test(value)) {
+      ids.add(value);
+      continue;
+    }
+    try {
+      const entity = await client.getEntity(value);
+      if (entity?.id !== undefined) {
+        const id = String(entity.id);
+        ids.add(id);
+        ids.add(`-100${id}`);
+      } else {
+        unresolved.push(value);
+      }
+    } catch {
+      unresolved.push(value);
+    }
+  }
+  return { ids, unresolved };
+}
+
+async function messageSenderInfo(message) {
+  const senderId = message.senderId !== undefined ? String(message.senderId) : "";
+  try {
+    const sender = typeof message.getSender === "function" ? await message.getSender() : null;
+    return {
+      senderId,
+      senderUsername: sender?.username || "",
+      senderName: [sender?.firstName, sender?.lastName].filter(Boolean).join(" ")
+    };
+  } catch {
+    return { senderId, senderUsername: "", senderName: "" };
+  }
+}
+
 async function main() {
   const apiId = Number(process.env.TELEGRAM_API_ID || 0);
   const apiHash = String(process.env.TELEGRAM_API_HASH || "").trim();
@@ -83,6 +125,7 @@ async function main() {
   const query = String(argValue("query", "") ?? "").trim();
   const memeOnly = argValue("memeOnly", "false") === "true";
   const memeMinScore = Math.max(1, Math.min(8, Number(argValue("memeMinScore", "2")) || 2));
+  const senderFilters = listArg("senders").map(normalizeSenderFilter).filter(Boolean);
   const targets = await readTargets();
 
   if (!apiId || !apiHash || !stringSession) {
@@ -99,6 +142,7 @@ async function main() {
     proxy
   });
   await client.connect();
+  const resolvedSenders = await resolveSenderFilters(client, senderFilters);
 
   try {
     const accounts = [];
@@ -112,6 +156,8 @@ async function main() {
         let matched = 0;
         for (const message of messages) {
           const text = message.message || "";
+          const sender = await messageSenderInfo(message);
+          if (resolvedSenders.ids.size && !resolvedSenders.ids.has(sender.senderId)) continue;
           if (!textMatches(text, query)) continue;
           const score = memeScore(text);
           if (memeOnly && score < memeMinScore) continue;
@@ -121,6 +167,9 @@ async function main() {
             platform: "telegram",
             group: target,
             authorHandle: target,
+            senderId: sender.senderId,
+            senderUsername: sender.senderUsername,
+            senderName: sender.senderName,
             publishedAt: message.date ? new Date(message.date * 1000).toISOString() : null,
             text,
             memeScore: score,
@@ -141,7 +190,7 @@ async function main() {
     const payload = {
       source: "telegram",
       targets,
-      filters: { query, memeOnly, memeMinScore, maxMessages },
+      filters: { query, memeOnly, memeMinScore, maxMessages, senderFilters, senderIds: [...resolvedSenders.ids], unresolvedSenders: resolvedSenders.unresolved },
       generatedAt: new Date().toISOString(),
       totalPosts: posts.length,
       accounts,
@@ -151,10 +200,12 @@ async function main() {
 
     await fs.writeFile(jsonPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
     const csvRows = [
-      ["id", "group", "publishedAt", "memeScore", "text", "url", "scrapedAt"].map(csvCell).join(","),
+      ["id", "group", "senderId", "senderUsername", "publishedAt", "memeScore", "text", "url", "scrapedAt"].map(csvCell).join(","),
       ...posts.map((post) => [
         post.id,
         post.group,
+        post.senderId,
+        post.senderUsername,
         post.publishedAt,
         post.memeScore,
         post.text,
