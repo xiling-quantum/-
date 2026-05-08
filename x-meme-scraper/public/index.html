@@ -533,59 +533,59 @@
   </head>
   <body>
     <header>
-      <div class="brand"><span id="appTitle">鎺ㄧ壒绉掔骇鐩戞帶</span> <span class="handle">鈮?/span></div>
+      <div class="brand"><span id="appTitle">推特秒级监控</span> <span class="handle">&lt;&lt;</span></div>
       <div class="top-actions">
-        <div class="status-pill"><span class="dot"></span> 宸茶繛鎺?<span class="tiny">鏈湴</span></div>
-        <button class="primary" type="button">鏈湴鐩戞帶鍙?/button>
+        <div class="status-pill"><span class="dot"></span> 已连接 <span class="tiny">本地</span></div>
+        <button class="primary" type="button">本地监控台</button>
       </div>
     </header>
 
     <div class="app">
       <aside>
         <nav class="nav">
-          <button class="active" data-view-button="watch">鍏虫敞鍒楄〃</button>
-          <button data-view-button="feed">淇℃伅娴?/button>
+          <button class="active" data-view-button="watch">关注列表</button>
+          <button data-view-button="feed">信息流</button>
         </nav>
-        <div class="expire">鍒版湡鏃堕棿锛?br><strong>2026-04-30</strong></div>
+        <div class="expire">到期时间：<br><strong>2026-04-30</strong></div>
       </aside>
 
       <main>
         <section id="watchView" class="view active">
           <div class="toolbar">
             <div class="button-row">
-              <button id="addButton" class="primary" type="button">娣诲姞鐩戞帶</button>
-              <button id="batchButton" class="green" type="button">鎵归噺鎶撳彇</button>
-              <button id="selectAllButton" class="ghost" type="button">鍏ㄩ€?/button>
+              <button id="addButton" class="primary" type="button">添加监控</button>
+              <button id="batchButton" class="green" type="button">批量抓取</button>
+              <button id="selectAllButton" class="ghost" type="button">全选</button>
             </div>
           </div>
 
           <div class="card watch-card">
-            <h2>鐩戞帶鍒楄〃锛?span id="watchCount">0</span>锛?/h2>
+            <h2>监控列表（<span id="watchCount">0</span>）</h2>
             <div class="watch-form">
-              <label>鎺ㄧ壒璐﹀彿
-                <input id="newHandle" placeholder="渚嬪 heyibinance" autocomplete="off" />
+              <label>推特账号
+                <input id="newHandle" placeholder="例如 heyibinance" autocomplete="off" />
               </label>
-              <label>澶囨敞
-                <input id="newNote" placeholder="渚嬪 甯佸畨 / meme / KOL锛屽彲鐣欑┖" autocomplete="off" />
+              <label>备注
+                <input id="newNote" placeholder="例如 币安 / meme / KOL，可留空" autocomplete="off" />
               </label>
-              <button id="addConfirmButton" class="primary" type="button">娣诲姞</button>
-              <button id="goFeedButton" class="ghost" type="button">鏌ョ湅淇℃伅娴?/button>
+              <button id="addConfirmButton" class="primary" type="button">添加</button>
+              <button id="goFeedButton" class="ghost" type="button">查看信息流</button>
             </div>
             <table>
               <thead>
                 <tr>
                   <th><input id="headerCheck" type="checkbox"></th>
-                  <th>鎺ㄧ壒璐﹀彿</th>
-                  <th>澶囨敞</th>
-                  <th>鏂板叧娉?/th>
-                  <th>鍘熷垱鎺ㄦ枃</th>
-                  <th>寮曠敤/杞帹</th>
-                  <th>鍥炲</th>
-                  <th>澶村儚/鑳屾櫙</th>
-                  <th>绠€浠?鏄电О</th>
-                  <th>缃《</th>
+                  <th>推特账号</th>
+                  <th>备注</th>
+                  <th>新关注</th>
+                  <th>原创推文</th>
+                  <th>引用/转推</th>
+                  <th>回复</th>
+                  <th>头像/背景</th>
+                  <th>简介/昵称</th>
+                  <th>置顶</th>
                   <th>CA</th>
-                  <th>鎿嶄綔</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody id="watchRows"></tbody>
@@ -597,72 +597,72 @@
           <div class="feed-layout">
             <div>
               <div class="feed-head">
-                <h2>鏈€鏂版帹鏂?/h2>
+                <h2>最新推文</h2>
                 <div class="checks">
-                  <label><input id="soundEnabled" type="checkbox" checked> 澹伴煶鎻愰啋</label>
-                  <label><input id="memeOnly" type="checkbox" checked> 鍙姄 meme 甯佸唴瀹?/label>
-                  <label><input id="aiClassify" type="checkbox"> AI 浜屾鍒ゆ柇</label>
-                  <label><input id="headless" type="checkbox" checked> 鏃犲ご妯″紡</label>
+                  <label><input id="soundEnabled" type="checkbox" checked> 声音提醒</label>
+                  <label><input id="memeOnly" type="checkbox" checked> 只抓 meme 币内容</label>
+                  <label><input id="aiClassify" type="checkbox"> AI 二次判断</label>
+                  <label><input id="headless" type="checkbox" checked> 无头模式</label>
                 </div>
               </div>
 
               <div class="filter-panel">
-                <label>鏈€澶氬笘瀛?                  <input id="maxPosts" type="number" min="1" max="100" value="20">
+                <label>最多帖子
+                  <input id="maxPosts" type="number" min="1" max="100" value="20">
                 </label>
-                <label>婊氬姩娆℃暟
+                <label>滚动次数
                   <input id="maxScrolls" type="number" min="1" max="50" value="8">
                 </label>
-                <label>骞跺彂椤垫暟
+                <label>并发页数
                   <input id="concurrency" type="number" min="1" max="5" value="3">
                 </label>
-                <label>meme 鍒嗘暟
+                <label>meme 分数
                   <input id="memeMinScore" type="number" min="1" max="8" value="2">
                 </label>
-                <label>AI 缃俊搴?                  <input id="aiMinConfidence" type="number" min="0" max="1" step="0.05" value="0.65">
+                <label>AI 置信度
+                  <input id="aiMinConfidence" type="number" min="0" max="1" step="0.05" value="0.65">
                 </label>
-                <label>AI 鎻愪緵鏂?                  <select id="aiProvider">
+                <label>AI 提供方
+                  <select id="aiProvider">
                     <option value="openai">OpenAI</option>
                     <option value="deepseek">DeepSeek</option>
                     <option value="kimi">Kimi</option>
                   </select>
                 </label>
-                <label>鍐呭鍖呭惈
-                  <input id="query" placeholder="鍙暀绌?>
+                <label>内容包含
+                  <input id="query" placeholder="可留空">
                 </label>
-                <label>寮€濮嬫椂闂?                </label>
-                <label>缁撴潫鏃堕棿
-                </label>
-                <label>鎶撳彇璐﹀彿
+                <label>抓取账号
                   <select id="accountSelect"></select>
                 </label>
-                <button id="scrapeButton" class="primary" type="button">寮€濮嬫姄鍙?/button>
+                <button id="scrapeButton" class="primary" type="button">开始抓取</button>
               </div>
 
               <div class="monitor-bar">
-                <label>瀹炴椂闂撮殧
+                <label>实时间隔
                   <select id="intervalSeconds">
-                    <option value="60">1 鍒嗛挓</option>
-                    <option value="180" selected>3 鍒嗛挓</option>
-                    <option value="300">5 鍒嗛挓</option>
-                    <option value="600">10 鍒嗛挓</option>
+                    <option value="60">1 分钟</option>
+                    <option value="180" selected>3 分钟</option>
+                    <option value="300">5 分钟</option>
+                    <option value="600">10 分钟</option>
                   </select>
                 </label>
-                <button id="monitorStartButton" class="green" type="button">鍚姩瀹炴椂鐩戞帶</button>
-                <button id="monitorStopButton" class="ghost" type="button">鍋滄鐩戞帶</button>
-                <button id="runNowButton" class="ghost" type="button">绔嬪嵆鎶撳彇涓€娆?/button>
-                <span id="monitorInfo" class="tiny">鐩戞帶鏈惎鍔?/span>
+                <button id="monitorStartButton" class="green" type="button">启动实时监控</button>
+                <button id="monitorStopButton" class="ghost" type="button">停止监控</button>
+                <button id="runNowButton" class="ghost" type="button">立即抓取一次</button>
+                <span id="monitorInfo" class="tiny">监控未启动</span>
               </div>
 
-              <div id="status" class="status-box good">鏈湴鏈嶅姟宸插氨缁€?/div>
+              <div id="status" class="status-box good">本地服务已就绪。</div>
               <div id="feedList"></div>
             </div>
 
             <div>
               <div class="feed-head">
-                <h2>鐢ㄦ埛娲诲姩</h2>
+                <h2>用户活动</h2>
                 <select id="activityFilter">
-                  <option>鎵€鏈夋椿鍔?/option>
-                  <option>浠呭凡閫夎处鍙?/option>
+                  <option>所有活动</option>
+                  <option>仅已选账号</option>
                 </select>
               </div>
               <div id="activityList"></div>
@@ -894,13 +894,13 @@
             </td>
             <td class="note"><input class="note-input" data-note="${index}" value="${escapeHtml(item.note || "")}" placeholder="添加备注"></td>
             ${Array.from({ length: 8 }, () => '<td><input type="checkbox" checked></td>').join("")}
-            <td><span class="delete" data-delete="${index}">鍒犻櫎</span></td>
+            <td><span class="delete" data-delete="${index}">删除</span></td>
           </tr>
         `).join("");
 
         accountSelect.innerHTML = [
-          '<option value="__selected__">宸查€夊叧娉ㄨ处鍙?/option>',
-          '<option value="__all__">鍏ㄩ儴鍏虫敞璐﹀彿</option>',
+          '<option value="__selected__">已选关注账号</option>',
+          '<option value="__all__">全部关注账号</option>',
           ...state.watchers.map((item) => `<option value="${escapeHtml(item.handle)}">@${escapeHtml(item.handle)}</option>`)
         ].join("");
       }
@@ -922,10 +922,10 @@
         const consensus = data?.consensus || [];
         const consensusHtml = consensus.length ? `
           <div class="consensus-panel">
-            <h3>澶氬崥涓诲叡璇嗗竵绉?/h3>
+            <h3>多博主共识币种</h3>
             <div class="consensus-list">
               ${consensus.slice(0, 12).map((item) => `
-                <span class="consensus-chip">${escapeHtml(item.display)} 路 ${escapeHtml(item.authorCount)} 涓崥涓?路 ${escapeHtml(item.postCount)} 鏉?/span>
+                <span class="consensus-chip">${escapeHtml(item.display)} · ${escapeHtml(item.authorCount)} 个博主 · ${escapeHtml(item.postCount)} 条</span>
               `).join("")}
             </div>
           </div>
@@ -933,9 +933,8 @@
         if (!posts.length) {
           const total = Number(data?.allTotalPosts ?? data?.totalPosts ?? 0);
           const emptyText = total > 0
-            ? `鏈疆鏃犳洿鏂般€傛渶鏂版姄鍙栧尮閰?${total} 鏉★紝浣嗘病鏈夋柊澧炴帹鏂囥€俙
-            : "杩樻病鏈夋帹鏂囩粨鏋溿€傚彲浠庡叧娉ㄥ垪琛ㄦ壒閲忔姄鍙栵紝鎴栧湪杩欓噷鐐瑰嚮寮€濮嬫姄鍙栥€?;
-          feedList.innerHTML = `${consensusHtml}<div class="empty">杩樻病鏈夋帹鏂囩粨鏋溿€傚彲浠庡叧娉ㄥ垪琛ㄦ壒閲忔姄鍙栵紝鎴栧湪杩欓噷鐐瑰嚮寮€濮嬫姄鍙栥€?/div>`;
+            ? `本轮无更新。最新抓取匹配 ${total} 条，但没有新增推文。`
+            : "还没有推文结果。可从关注列表批量抓取，或在这里点击开始抓取。";
           feedList.innerHTML = `${consensusHtml}<div class="empty">${escapeHtml(emptyText)}</div>`;
           renderActivity(data);
           return;
@@ -951,7 +950,7 @@
                   <div class="avatar">${escapeHtml((handle || "X").slice(0, 1).toUpperCase())}</div>
                   <div>
                     <strong>${escapeHtml(watcher?.name || post.authorHandle || handle)}</strong>
-                    <div class="handle">${escapeHtml(post.authorHandle)} 路 ${escapeHtml(watcher?.note || "鐩戞帶璐﹀彿")}</div>
+                    <div class="handle">${escapeHtml(post.authorHandle)} · ${escapeHtml(watcher?.note || "监控账号")}</div>
                   </div>
                 </div>
                 <div class="tweet-time">${escapeHtml(formatDate(post.publishedAt))}</div>
@@ -960,26 +959,26 @@
               ${(post.contractAddresses || []).length ? `
                 <div class="tweet-badges">
                   ${(post.contractAddresses || []).slice(0, 3).map((address) => `
-                    <span class="tweet-badge consensus">鍚堢害鍦板潃 ${escapeHtml(address.slice(0, 6))}...${escapeHtml(address.slice(-4))}</span>
+                    <span class="tweet-badge consensus">合约地址 ${escapeHtml(address.slice(0, 6))}...${escapeHtml(address.slice(-4))}</span>
                   `).join("")}
                 </div>
               ` : ""}
               ${(post.consensusSignals || []).length ? `
                 <div class="tweet-badges">
                   ${(post.consensusSignals || []).slice(0, 4).map((signal) => `
-                    <span class="tweet-badge consensus">鍏辫瘑 ${escapeHtml(signal.display)} 路 ${escapeHtml(signal.authorCount)} 鍗氫富</span>
+                    <span class="tweet-badge consensus">共识 ${escapeHtml(signal.display)} · ${escapeHtml(signal.authorCount)} 博主</span>
                   `).join("")}
                 </div>
               ` : ""}
               ${(post.memeScore || post.memeReasons?.length) ? `
                 <div class="tweet-badges">
-                  <span class="tweet-badge">meme 鍒嗘暟 ${escapeHtml(post.memeScore || 0)}</span>
+                  <span class="tweet-badge">meme 分数 ${escapeHtml(post.memeScore || 0)}</span>
                   ${(post.memeReasons || []).slice(0, 4).map((reason) => `<span class="tweet-badge">${escapeHtml(reason)}</span>`).join("")}
                 </div>
               ` : ""}
               ${(post.analysisScore || post.analysisReasons?.length) ? `
                 <div class="tweet-badges">
-                  <span class="tweet-badge">鍒嗘瀽鍒嗘暟 ${escapeHtml(post.analysisScore || 0)}</span>
+                  <span class="tweet-badge">分析分数 ${escapeHtml(post.analysisScore || 0)}</span>
                   ${(post.analysisReasons || []).slice(0, 4).map((reason) => `<span class="tweet-badge">${escapeHtml(reason)}</span>`).join("")}
                 </div>
               ` : ""}
@@ -987,7 +986,7 @@
                 <div class="tweet-badges">
                   <span class="tweet-badge">AI ${escapeHtml(post.aiClassification.label)}</span>
                   <span class="tweet-badge">${escapeHtml(post.aiProvider || "")} ${escapeHtml(post.aiModel || "")}</span>
-                  <span class="tweet-badge">缃俊搴?${escapeHtml(post.aiClassification.confidence)}</span>
+                  <span class="tweet-badge">置信度 ${escapeHtml(post.aiClassification.confidence)}</span>
                   <span class="tweet-badge">${escapeHtml(post.aiClassification.reason)}</span>
                 </div>
               ` : ""}
@@ -1018,7 +1017,7 @@
             </div>
           `;
         }).join("");
-        activityList.innerHTML = `<div class="activity-card">${rows || '<div class="empty">鏆傛棤鐢ㄦ埛娲诲姩</div>'}</div>`;
+        activityList.innerHTML = `<div class="activity-card">${rows || '<div class="empty">暂无用户活动</div>'}</div>`;
       }
 
       async function loadLatest() {
@@ -1034,32 +1033,31 @@
         scrapeButton.disabled = Boolean(status.running);
         document.getElementById("batchButton").disabled = Boolean(status.running);
         if (status.running) {
-          setStatus("姝ｅ湪鎶撳彇鍏虫敞璐﹀彿銆傝嫢鍏抽棴鏃犲ご妯″紡骞跺嚭鐜?X 鐧诲綍绐楀彛锛岃鎵嬪姩鐧诲綍銆?, "warn");
+          setStatus("正在抓取关注账号。若关闭无头模式并出现 X 登录窗口，请手动登录。", "warn");
           setTimeout(pollStatus, 1600);
           return;
         }
         if (status.status === "completed") {
-          setStatus(`鎶撳彇瀹屾垚锛?{status.totalPosts} 鏉″尮閰嶆帹鏂囥€俙, "good");
           const latest = await loadLatest();
           const newTotal = Number(latest?.newTotalPosts ?? latest?.totalPosts ?? status.totalPosts ?? 0);
           const total = Number(latest?.allTotalPosts ?? latest?.totalPosts ?? status.totalPosts ?? 0);
-          setStatus(newTotal > 0 ? `鎶撳彇瀹屾垚锛氬尮閰?${total} 鏉★紝鏂板 ${newTotal} 鏉°€俙 : `鎶撳彇瀹屾垚锛氬尮閰?${total} 鏉★紝鏈疆鏃犳洿鏂般€俙, "good");
+          setStatus(newTotal > 0 ? `抓取完成：匹配 ${total} 条，新增 ${newTotal} 条。` : `抓取完成：匹配 ${total} 条，本轮无更新。`, "good");
           return;
         }
         if (status.status === "failed") {
-          setStatus(`鎶撳彇澶辫触锛?{status.error || "鏈煡閿欒"}`, "bad");
+          setStatus(`抓取失败：${status.error || "未知错误"}`, "bad");
           return;
         }
-        setStatus("鏈湴鏈嶅姟宸插氨缁€?, "good");
+        setStatus("本地服务已就绪。", "good");
       }
 
       async function startScrape(handles) {
         const usernames = handles.length ? handles : selectedHandles();
         if (!usernames.length) {
-          setStatus("璇峰厛閫夋嫨鑷冲皯涓€涓叧娉ㄨ处鍙枫€?, "bad");
+          setStatus("请先选择至少一个关注账号。", "bad");
           return;
         }
-        setStatus("宸叉彁浜ゆ姄鍙栦换鍔?..", "warn");
+        setStatus("已提交抓取任务...", "warn");
         await saveUiSettingsNow().catch(() => {});
         scrapeButton.disabled = true;
         const response = await fetch("/api/browser/collect", {
@@ -1085,7 +1083,7 @@
         });
         const payload = await response.json();
         if (!response.ok) {
-          setStatus(payload.message || payload.error || "鍚姩澶辫触", "bad");
+          setStatus(payload.message || payload.error || "启动失败", "bad");
           scrapeButton.disabled = false;
           return;
         }
@@ -1115,13 +1113,13 @@
       async function loadAppInfo() {
         const response = await fetch(`/api/app-info?t=${Date.now()}`, { cache: "no-store" });
         appInfo = await response.json();
-        document.title = appInfo.title || "鎺ㄧ壒绉掔骇鐩戞帶";
-        appTitle.textContent = appInfo.title || "鎺ㄧ壒绉掔骇鐩戞帶";
+        document.title = appInfo.title || "推特秒级监控";
+        appTitle.textContent = appInfo.title || "推特秒级监控";
         const defaults = appInfo.defaultFilters || {};
         document.getElementById("memeOnly").checked = Boolean(defaults.memeOnly);
         document.getElementById("memeMinScore").value = String(defaults.memeMinScore ?? 2);
         if (appInfo.mode === "analysis") {
-          document.getElementById("query").placeholder = "渚嬪 閾句笂銆佹暟鎹€佸垎鏋愩€佽鐐广€乼hread锛屽彲鐣欑┖";
+          document.getElementById("query").placeholder = "例如 链上、数据、分析、观点、thread，可留空";
         }
       }
 
@@ -1129,10 +1127,10 @@
         const response = await fetch(`/api/monitor/status?t=${Date.now()}`, { cache: "no-store" });
         const monitor = await response.json();
         if (!monitor.enabled) {
-          monitorInfo.textContent = "鐩戞帶鏈惎鍔?;
+          monitorInfo.textContent = "监控未启动";
           return;
         }
-        monitorInfo.textContent = `瀹炴椂鐩戞帶涓?路 闂撮殧 ${monitor.intervalSeconds}s 路 涓嬫 ${formatDate(monitor.nextRunAt)} 路 宸茶窇 ${monitor.runCount} 娆;
+        monitorInfo.textContent = `实时监控中 · 间隔 ${monitor.intervalSeconds}s · 下次 ${formatDate(monitor.nextRunAt)} · 已跑 ${monitor.runCount} 次`;
       }
 
       document.querySelectorAll("[data-view-button]").forEach((button) => {
@@ -1212,7 +1210,7 @@
       document.getElementById("monitorStartButton").addEventListener("click", async () => {
         const config = scrapeConfig(handlesForScrape());
         if (!config.usernames.length) {
-          setStatus("璇峰厛閫夋嫨鑷冲皯涓€涓叧娉ㄨ处鍙枫€?, "bad");
+          setStatus("请先选择至少一个关注账号。", "bad");
           return;
         }
         await saveUiSettingsNow().catch(() => {});
