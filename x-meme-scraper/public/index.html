@@ -522,12 +522,33 @@
         min-width: 120px;
       }
 
+      .telegram-panel {
+        display: grid;
+        gap: 14px;
+      }
+
+      .telegram-form {
+        display: grid;
+        grid-template-columns: minmax(220px, 1fr) 120px 120px auto;
+        gap: 12px;
+        align-items: end;
+      }
+
+      .telegram-meta {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        color: var(--muted);
+      }
+
       @media (max-width: 1180px) {
         .app { grid-template-columns: 1fr; }
         aside { display: none; }
         .feed-layout { grid-template-columns: 1fr; }
         .filter-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .watch-form { grid-template-columns: 1fr; }
+        .telegram-form { grid-template-columns: 1fr; }
       }
     </style>
   </head>
@@ -545,6 +566,7 @@
         <nav class="nav">
           <button class="active" data-view-button="watch">关注列表</button>
           <button data-view-button="feed">信息流</button>
+          <button data-view-button="telegram">Telegram</button>
         </nav>
         <div class="expire">到期时间：<br><strong>2026-04-30</strong></div>
       </aside>
@@ -675,6 +697,36 @@
             </div>
           </div>
         </section>
+
+        <section id="telegramView" class="view">
+          <div class="card watch-card telegram-panel">
+            <div class="toolbar">
+              <h2>Telegram 群聊抓取</h2>
+              <div class="telegram-meta">
+                <span id="telegramStatus">已登录，本地代理已配置</span>
+              </div>
+            </div>
+            <div class="telegram-form">
+              <label>群或频道
+                <input id="telegramGroups" placeholder="例如 binance_announcements,group2" autocomplete="off" value="telegram">
+              </label>
+              <label>消息数
+                <input id="telegramMaxMessages" type="number" min="1" max="200" value="50">
+              </label>
+              <label>meme 分数
+                <input id="telegramMemeMinScore" type="number" min="1" max="8" value="2">
+              </label>
+              <button id="telegramScrapeButton" class="primary" type="button">开始抓取</button>
+              <label>内容包含
+                <input id="telegramQuery" placeholder="可留空">
+              </label>
+              <label><input id="telegramMemeOnly" type="checkbox" checked> 只抓 meme 内容</label>
+              <button id="telegramLoadButton" class="ghost" type="button">刷新结果</button>
+            </div>
+            <div id="telegramMessage" class="status-box good">Telegram 服务已就绪。</div>
+            <div id="telegramList"></div>
+          </div>
+        </section>
       </main>
     </div>
     <div id="mediaLightbox" class="media-lightbox" aria-hidden="true">
@@ -699,6 +751,7 @@
 
       const watchView = document.getElementById("watchView");
       const feedView = document.getElementById("feedView");
+      const telegramView = document.getElementById("telegramView");
       const watchRows = document.getElementById("watchRows");
       const watchCount = document.getElementById("watchCount");
       const newHandle = document.getElementById("newHandle");
@@ -711,6 +764,9 @@
       const scrapeButton = document.getElementById("scrapeButton");
       const historyDateSelect = document.getElementById("historyDateSelect");
       const monitorInfo = document.getElementById("monitorInfo");
+      const telegramList = document.getElementById("telegramList");
+      const telegramMessage = document.getElementById("telegramMessage");
+      const telegramScrapeButton = document.getElementById("telegramScrapeButton");
       const appTitle = document.getElementById("appTitle");
       const mediaLightbox = document.getElementById("mediaLightbox");
       const mediaLightboxImage = document.getElementById("mediaLightboxImage");
@@ -844,6 +900,11 @@
       function setStatus(text, type = "good") {
         statusNode.textContent = text;
         statusNode.className = `status-box ${type}`;
+      }
+
+      function setTelegramStatus(text, type = "good") {
+        telegramMessage.textContent = text;
+        telegramMessage.className = `status-box ${type}`;
       }
 
       function formatDate(value) {
@@ -1031,6 +1092,113 @@
         activityList.innerHTML = `<div class="activity-card">${rows || '<div class="empty">暂无用户活动</div>'}</div>`;
       }
 
+      function renderTelegram(data) {
+        const posts = data?.posts || [];
+        document.getElementById("telegramStatus").textContent = `最近结果：${posts.length} 条 · ${formatDate(data?.generatedAt)}`;
+        if (!posts.length) {
+          telegramList.innerHTML = '<div class="empty">还没有 Telegram 结果。输入群或频道后点击开始抓取。</div>';
+          return;
+        }
+        telegramList.innerHTML = posts.map((post) => {
+          const group = String(post.group || post.authorHandle || "telegram").replace(/^@/, "");
+          return `
+            <article class="tweet-card">
+              <div class="tweet-top">
+                <div class="tweet-author">
+                  <div class="avatar">${escapeHtml(group.slice(0, 1).toUpperCase() || "T")}</div>
+                  <div>
+                    <strong>${escapeHtml(group)}</strong>
+                    <div class="handle">Telegram · ${escapeHtml(post.url || "")}</div>
+                  </div>
+                </div>
+                <div class="tweet-time">${escapeHtml(formatDate(post.publishedAt))}</div>
+              </div>
+              <p class="tweet-text">${escapeHtml(post.text)}</p>
+              <div class="tweet-badges">
+                <span class="tweet-badge">meme 分数 ${escapeHtml(post.memeScore || 0)}</span>
+              </div>
+            </article>
+          `;
+        }).join("");
+      }
+
+      function readTelegramConfig() {
+        return {
+          groups: document.getElementById("telegramGroups").value.split(",").map((item) => item.trim()).filter(Boolean),
+          maxMessages: Number(document.getElementById("telegramMaxMessages").value),
+          query: document.getElementById("telegramQuery").value.trim(),
+          memeOnly: document.getElementById("telegramMemeOnly").checked,
+          memeMinScore: Number(document.getElementById("telegramMemeMinScore").value)
+        };
+      }
+
+      function saveTelegramForm() {
+        localStorage.setItem("x-monitor-telegram-form", JSON.stringify(readTelegramConfig()));
+      }
+
+      function loadTelegramForm() {
+        try {
+          const saved = JSON.parse(localStorage.getItem("x-monitor-telegram-form") || "null");
+          if (!saved) return;
+          document.getElementById("telegramGroups").value = (saved.groups || []).join(",");
+          document.getElementById("telegramMaxMessages").value = String(saved.maxMessages || 50);
+          document.getElementById("telegramQuery").value = saved.query || "";
+          document.getElementById("telegramMemeOnly").checked = saved.memeOnly !== false;
+          document.getElementById("telegramMemeMinScore").value = String(saved.memeMinScore || 2);
+        } catch {}
+      }
+
+      async function loadTelegramLatest() {
+        const response = await fetch(`/api/telegram/latest?t=${Date.now()}`, { cache: "no-store" });
+        const data = await response.json();
+        renderTelegram(data);
+        return data;
+      }
+
+      async function pollTelegramStatus() {
+        const response = await fetch(`/api/telegram/status?t=${Date.now()}`, { cache: "no-store" });
+        const status = await response.json();
+        telegramScrapeButton.disabled = Boolean(status.running);
+        if (status.running) {
+          setTelegramStatus("Telegram 正在抓取...", "warn");
+          setTimeout(pollTelegramStatus, 1200);
+          return;
+        }
+        if (status.status === "completed") {
+          const latest = await loadTelegramLatest();
+          setTelegramStatus(`Telegram 抓取完成：${latest.totalPosts || status.totalPosts || 0} 条。`, status.error ? "warn" : "good");
+          return;
+        }
+        if (status.status === "failed") {
+          setTelegramStatus(`Telegram 抓取失败：${status.error || "未知错误"}`, "bad");
+          return;
+        }
+        setTelegramStatus("Telegram 服务已就绪。", "good");
+      }
+
+      async function startTelegramScrape() {
+        const config = readTelegramConfig();
+        if (!config.groups.length) {
+          setTelegramStatus("请输入至少一个 Telegram 群或频道。", "bad");
+          return;
+        }
+        saveTelegramForm();
+        telegramScrapeButton.disabled = true;
+        setTelegramStatus("已提交 Telegram 抓取任务...", "warn");
+        const response = await fetch("/api/telegram/collect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(config)
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          setTelegramStatus(payload.message || payload.error || "Telegram 启动失败", "bad");
+          telegramScrapeButton.disabled = false;
+          return;
+        }
+        await pollTelegramStatus();
+      }
+
       async function loadLatest() {
         const response = await fetch(`/api/browser/latest?t=${Date.now()}`, { cache: "no-store" });
         const data = await response.json();
@@ -1176,12 +1344,14 @@
           const view = button.dataset.viewButton;
           watchView.classList.toggle("active", view === "watch");
           feedView.classList.toggle("active", view === "feed");
+          telegramView.classList.toggle("active", view === "telegram");
         });
       });
 
       document.getElementById("goFeedButton").addEventListener("click", () => {
         watchView.classList.remove("active");
         feedView.classList.add("active");
+        telegramView.classList.remove("active");
         document.querySelectorAll("[data-view-button]").forEach((item) => item.classList.toggle("active", item.dataset.viewButton === "feed"));
       });
 
@@ -1242,6 +1412,11 @@
       });
 
       scrapeButton.addEventListener("click", () => startScrape(handlesForScrape()));
+      telegramScrapeButton.addEventListener("click", startTelegramScrape);
+      document.getElementById("telegramLoadButton").addEventListener("click", loadTelegramLatest);
+      ["telegramGroups", "telegramMaxMessages", "telegramQuery", "telegramMemeOnly", "telegramMemeMinScore"].forEach((id) => {
+        document.getElementById(id).addEventListener("change", saveTelegramForm);
+      });
 
       document.getElementById("monitorStartButton").addEventListener("click", async () => {
         const config = scrapeConfig(handlesForScrape());
@@ -1306,8 +1481,10 @@
       await loadWatchers();
       renderWatchers();
       await loadUiSettings();
+      loadTelegramForm();
       await loadHistoryDates();
       await loadFeedForSelectedDate();
+      await loadTelegramLatest();
       await loadMonitorStatus();
       await pollStatus();
       setInterval(async () => {
