@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
 import { loadLocalEnv, parseSocksProxy } from "./local-env.js";
+import { formatTelegramBatchNotification, sendTelegramNotification, telegramNotifyConfigured } from "./telegram-notify.js";
 
 loadLocalEnv();
 
@@ -214,6 +215,13 @@ async function main() {
       ].map(csvCell).join(","))
     ];
     await fs.writeFile(csvPath, `${csvRows.join("\n")}\n`, "utf8");
+    if (telegramNotifyConfigured() && posts.length) {
+      try {
+        await sendTelegramNotification(client, formatTelegramBatchNotification(payload));
+      } catch (error) {
+        console.error(`Telegram notify failed: ${error.message}`);
+      }
+    }
 
     console.log(`Scraped ${posts.length} Telegram messages from ${targets.join(", ")}`);
     console.log(`JSON: ${jsonPath}`);

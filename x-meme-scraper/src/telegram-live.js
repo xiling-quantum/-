@@ -6,6 +6,7 @@ import { TelegramClient } from "telegram";
 import { NewMessage } from "telegram/events/index.js";
 import { StringSession } from "telegram/sessions/index.js";
 import { loadLocalEnv, parseSocksProxy } from "./local-env.js";
+import { formatTelegramPostNotification, sendTelegramNotification, telegramNotifyConfigured } from "./telegram-notify.js";
 
 loadLocalEnv();
 
@@ -213,6 +214,16 @@ function queuePersistPost(post, targets, filters, maxLatest) {
   return persistQueue;
 }
 
+async function notifyPost(client, post) {
+  if (!telegramNotifyConfigured()) return;
+  try {
+    await sendTelegramNotification(client, formatTelegramPostNotification(post));
+    emit({ type: "notified", group: post.group, id: post.id });
+  } catch (error) {
+    emit({ type: "notify-error", message: error.message });
+  }
+}
+
 async function initializeLatestPayload(targets, filters) {
   const latest = await readJsonFile(latestPath, emptyPayload(targets, filters));
   latest.source = "telegram-live";
@@ -324,6 +335,7 @@ async function main() {
       };
 
       await queuePersistPost(post, targets, filters, maxLatest);
+      await notifyPost(client, post);
       emit({ type: "message", received, matched, group, id: post.id, publishedAt: post.publishedAt });
     } catch (error) {
       emit({ type: "handler-error", message: error.message });
@@ -335,7 +347,8 @@ async function main() {
     targets,
     resolvedTargets: entities.length,
     errors,
-    filters
+    filters,
+    notifyTargetConfigured: telegramNotifyConfigured()
   });
 
   process.on("SIGINT", async () => {
