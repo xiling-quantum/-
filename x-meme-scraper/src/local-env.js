@@ -25,3 +25,21 @@ export function loadLocalEnv() {
     }
   }
 }
+
+export function parseSocksProxy(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return undefined;
+  const parsed = new URL(raw);
+  const protocol = parsed.protocol.replace(":", "").toLowerCase();
+  if (!["socks4", "socks5"].includes(protocol)) {
+    throw new Error("Telegram proxy must be socks4:// or socks5://");
+  }
+  return {
+    ip: parsed.hostname,
+    port: Number(parsed.port),
+    socksType: protocol === "socks4" ? 4 : 5,
+    username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
+    password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
+    timeout: 20
+  };
+}

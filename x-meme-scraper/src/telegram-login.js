@@ -2,12 +2,13 @@ import process from "node:process";
 import input from "input";
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
-import { loadLocalEnv } from "./local-env.js";
+import { loadLocalEnv, parseSocksProxy } from "./local-env.js";
 
 loadLocalEnv();
 
 const apiId = Number(process.env.TELEGRAM_API_ID || 0);
 const apiHash = String(process.env.TELEGRAM_API_HASH || "").trim();
+const proxy = parseSocksProxy(process.env.TELEGRAM_PROXY_URL);
 
 if (!apiId || !apiHash) {
   console.error("Set TELEGRAM_API_ID and TELEGRAM_API_HASH before logging in.");
@@ -15,7 +16,8 @@ if (!apiId || !apiHash) {
 }
 
 const client = new TelegramClient(new StringSession(""), apiId, apiHash, {
-  connectionRetries: 5
+  connectionRetries: 5,
+  proxy
 });
 
 await client.start({

@@ -4,7 +4,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
-import { loadLocalEnv } from "./local-env.js";
+import { loadLocalEnv, parseSocksProxy } from "./local-env.js";
 
 loadLocalEnv();
 
@@ -78,6 +78,7 @@ async function main() {
   const apiId = Number(process.env.TELEGRAM_API_ID || 0);
   const apiHash = String(process.env.TELEGRAM_API_HASH || "").trim();
   const stringSession = String(process.env.TELEGRAM_STRING_SESSION || "").trim();
+  const proxy = parseSocksProxy(process.env.TELEGRAM_PROXY_URL);
   const maxMessages = Math.max(1, Math.min(200, Number(argValue("max", "50")) || 50));
   const query = String(argValue("query", "") ?? "").trim();
   const memeOnly = argValue("memeOnly", "false") === "true";
@@ -94,7 +95,8 @@ async function main() {
   await fs.mkdir(dataDir, { recursive: true });
 
   const client = new TelegramClient(new StringSession(stringSession), apiId, apiHash, {
-    connectionRetries: 5
+    connectionRetries: 5,
+    proxy
   });
   await client.connect();
 
