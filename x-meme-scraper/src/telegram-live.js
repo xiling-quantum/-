@@ -243,7 +243,7 @@ async function main() {
     } catch (error) {
       emit({ type: "handler-error", message: error.message });
     }
-  }, new NewMessage({ chats: entities, incoming: true }));
+  }, new NewMessage({ chats: targets, incoming: true }));
 
   emit({
     type: "ready",
