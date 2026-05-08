@@ -32,6 +32,7 @@ const TWEET_FIELDS = [
   "possibly_sensitive"
 ];
 const MEDIA_FIELDS = ["media_key", "type", "url", "preview_image_url", "width", "height"];
+const BROWSER_BATCH_TIMEOUT_MS = 8 * 60 * 1000;
 
 let activeRun = null;
 let lastRun = {
@@ -1271,6 +1272,18 @@ async function collectWithBrowser(requestBody) {
   const aiMinConfidence = Math.max(0, Math.min(1, Number(requestBody?.aiMinConfidence ?? 0.65)));
   const scriptPath = path.join(projectRoot, "src", "browser-scrape.js");
 
+  function killChildTree(child) {
+    if (!child?.pid) return;
+    if (process.platform === "win32") {
+      spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+        windowsHide: true,
+        stdio: "ignore"
+      });
+      return;
+    }
+    child.kill("SIGTERM");
+  }
+
   async function runBrowserBatch() {
     const args = [
       scriptPath,
@@ -1319,6 +1332,16 @@ async function collectWithBrowser(requestBody) {
       });
       let stdout = "";
       let stderr = "";
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        killChildTree(child);
+        const error = new Error(`browser scraper timed out after ${Math.round(BROWSER_BATCH_TIMEOUT_MS / 1000)} seconds`);
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+      }, BROWSER_BATCH_TIMEOUT_MS);
 
       child.stdout.on("data", (chunk) => {
         stdout += chunk.toString("utf8");
@@ -1326,8 +1349,16 @@ async function collectWithBrowser(requestBody) {
       child.stderr.on("data", (chunk) => {
         stderr += chunk.toString("utf8");
       });
-      child.on("error", reject);
+      child.on("error", (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        reject(error);
+      });
       child.on("close", async (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
         try {
           if (code !== 0) {
             throw new Error(stderr.trim() || stdout.trim() || `browser scraper exited with ${code}`);
