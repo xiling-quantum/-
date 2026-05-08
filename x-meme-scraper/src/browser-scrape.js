@@ -367,18 +367,33 @@ async function classifyPostsWithAI(posts, mode, minConfidence) {
 function dateMatches(value, startDate, endDate) {
   if (!startDate && !endDate) return true;
   const relativeTime = String(value?.relativeText ?? value?.relativeTime ?? "").trim();
-  if (startDate && !endDate && /(\d+\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours)|\d+\s*(秒|分钟|小時|小时|时)|刚刚|现在)/i.test(relativeTime)) {
-    return true;
-  }
   value = typeof value === "object" && value !== null ? value.publishedAt : value;
-  if (!value) return false;
-  const date = new Date(value);
+  let date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) {
+    date = parseRelativeDate(relativeTime);
+  }
   if (Number.isNaN(date.getTime())) return false;
   if (startDate && date < startDate) return false;
   if (endDate && date > endDate) return false;
   return true;
 }
 
+function parseRelativeDate(value) {
+  const text = String(value ?? "").trim().toLowerCase();
+  if (!text) return new Date(Number.NaN);
+  if (/^(now|just now|刚刚|剛剛|现在|現在)$/.test(text)) return new Date();
+  const match = text.match(/(\d+)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days|秒|秒钟|秒鐘|分钟|分鐘|分|小时|小時|时|時|天|日)/i);
+  if (!match) return new Date(Number.NaN);
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount)) return new Date(Number.NaN);
+  const unit = match[2].toLowerCase();
+  let milliseconds = 0;
+  if (/^(s|sec|second|seconds|秒|秒钟|秒鐘)$/.test(unit)) milliseconds = amount * 1000;
+  if (/^(m|min|minute|minutes|分钟|分鐘|分)$/.test(unit)) milliseconds = amount * 60 * 1000;
+  if (/^(h|hr|hour|hours|小时|小時|时|時)$/.test(unit)) milliseconds = amount * 60 * 60 * 1000;
+  if (/^(d|day|days|天|日)$/.test(unit)) milliseconds = amount * 24 * 60 * 60 * 1000;
+  return milliseconds ? new Date(Date.now() - milliseconds) : new Date(Number.NaN);
+}
 async function autoScroll(page, maxPosts, maxScrolls) {
   let previousCount = 0;
   let staleRounds = 0;

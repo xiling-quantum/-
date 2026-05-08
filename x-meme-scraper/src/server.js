@@ -754,31 +754,51 @@ function localDateKey(value) {
   return `${year}-${month}-${day}`;
 }
 
+function postLocalDateKey(post, fallback) {
+  return localDateKey(post?.publishedAt || post?.createdAt || fallback);
+}
+
+function postUniqueKey(post) {
+  return String(post?.id || post?.url || `${post?.authorHandle || ""}:${post?.publishedAt || ""}:${post?.text || ""}`);
+}
+
 async function listBrowserRunDates() {
   const attempts = uniqueBrowserRunAttempts(await listLoadedBrowserRuns())
     .filter((run) => Number(run.totalPosts || 0) > 0);
   const byDate = new Map();
   for (const run of attempts) {
-    const date = localDateKey(run.generatedAt || run.modifiedAt);
-    if (!date) continue;
-    if (!byDate.has(date)) {
-      byDate.set(date, {
-        date,
-        runCount: 0,
-        latestAt: null,
-        latestFile: null,
-        latestTotalPosts: 0
-      });
-    }
-    const item = byDate.get(date);
-    item.runCount += 1;
-    if (!item.latestAt || String(run.generatedAt || "") > item.latestAt) {
-      item.latestAt = run.generatedAt || null;
-      item.latestFile = run.file;
-      item.latestTotalPosts = run.totalPosts || 0;
+    for (const post of run.posts || []) {
+      const date = postLocalDateKey(post, run.generatedAt || run.modifiedAt);
+      if (!date) continue;
+      if (!byDate.has(date)) {
+        byDate.set(date, {
+          date,
+          runCount: 0,
+          latestAt: null,
+          latestFile: null,
+          latestTotalPosts: 0,
+          postIds: new Set(),
+          runFiles: new Set()
+        });
+      }
+      const item = byDate.get(date);
+      item.postIds.add(postUniqueKey(post));
+      item.runFiles.add(run.file);
+      if (!item.latestAt || String(run.generatedAt || "") > item.latestAt) {
+        item.latestAt = run.generatedAt || null;
+        item.latestFile = run.file;
+      }
     }
   }
-  return [...byDate.values()].sort((left, right) => right.date.localeCompare(left.date));
+  return [...byDate.values()]
+    .map((item) => ({
+      date: item.date,
+      runCount: item.runFiles.size,
+      latestAt: item.latestAt,
+      latestFile: item.latestFile,
+      latestTotalPosts: item.postIds.size
+    }))
+    .sort((left, right) => right.date.localeCompare(left.date));
 }
 
 async function readBrowserRunByDate(date) {
@@ -786,13 +806,15 @@ async function readBrowserRunByDate(date) {
     throw new Error("日期格式无效，应为 YYYY-MM-DD");
   }
   const attempts = uniqueBrowserRunAttempts(await listLoadedBrowserRuns())
-    .filter((run) => Number(run.totalPosts || 0) > 0 && localDateKey(run.generatedAt || run.modifiedAt) === date)
+    .filter((run) => Number(run.totalPosts || 0) > 0)
     .sort((left, right) => String(right.generatedAt || "").localeCompare(String(left.generatedAt || "")));
 
   const postsById = new Map();
   const accountsByName = new Map();
   const errors = [];
+  let runCount = 0;
   for (const run of attempts) {
+    let hasDatePost = false;
     for (const account of run.accounts || []) {
       accountsByName.set(account.username, account);
     }
@@ -800,22 +822,27 @@ async function readBrowserRunByDate(date) {
       errors.push(error);
     }
     for (const post of run.posts || []) {
-      const key = String(post.id || post.url || "");
+      if (postLocalDateKey(post, run.generatedAt || run.modifiedAt) !== date) continue;
+      hasDatePost = true;
+      const key = postUniqueKey(post);
       if (!key || postsById.has(key)) continue;
       postsById.set(key, post);
     }
+    if (hasDatePost) runCount += 1;
   }
 
   const posts = [...postsById.values()]
     .sort((left, right) => String(right.publishedAt || "").localeCompare(String(left.publishedAt || "")));
   const consensus = applyCrossValidation(posts, 2);
-  const latest = attempts[0] || null;
+  const latest = attempts.find((run) =>
+    (run.posts || []).some((post) => postLocalDateKey(post, run.generatedAt || run.modifiedAt) === date)
+  ) || null;
   return {
     source: "browser-history-date",
     date,
     file: latest?.file || null,
     generatedAt: latest?.generatedAt || null,
-    runCount: attempts.length,
+    runCount,
     totalPosts: posts.length,
     allTotalPosts: posts.length,
     newTotalPosts: posts.length,
