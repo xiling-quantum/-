@@ -154,6 +154,34 @@ async function persistPost(post, targets, filters, maxLatest) {
   await writeLivePayload(dailyPath, daily);
 }
 
+let persistQueue = Promise.resolve();
+
+function queuePersistPost(post, targets, filters, maxLatest) {
+  persistQueue = persistQueue
+    .then(() => persistPost(post, targets, filters, maxLatest))
+    .catch((error) => {
+      emit({ type: "persist-error", message: error.message });
+    });
+  return persistQueue;
+}
+
+async function initializeLatestPayload(targets, filters) {
+  const latest = await readJsonFile(latestPath, emptyPayload(targets, filters));
+  latest.source = "telegram-live";
+  latest.targets = targets;
+  latest.filters = filters;
+  latest.generatedAt = new Date().toISOString();
+  latest.posts = Array.isArray(latest.posts) ? latest.posts.slice(0, Number(filters.maxLatest || 500)) : [];
+  latest.totalPosts = latest.posts.length;
+  latest.accounts = targets.map((target) => ({
+    target,
+    received: latest.posts.filter((item) => item.group === target).length,
+    matched: latest.posts.filter((item) => item.group === target).length
+  }));
+  latest.errors = Array.isArray(latest.errors) ? latest.errors : [];
+  await writeLivePayload(latestPath, latest);
+}
+
 async function main() {
   const apiId = Number(process.env.TELEGRAM_API_ID || 0);
   const apiHash = String(process.env.TELEGRAM_API_HASH || "").trim();
@@ -174,7 +202,7 @@ async function main() {
   }
 
   await fs.mkdir(dataDir, { recursive: true });
-  await writeLivePayload(latestPath, emptyPayload(targets, filters));
+  await initializeLatestPayload(targets, filters);
 
   const client = new TelegramClient(new StringSession(stringSession), apiId, apiHash, {
     connectionRetries: 5,
@@ -238,7 +266,7 @@ async function main() {
         scrapedAt: new Date().toISOString()
       };
 
-      await persistPost(post, targets, filters, maxLatest);
+      await queuePersistPost(post, targets, filters, maxLatest);
       emit({ type: "message", received, matched, group, id: post.id, publishedAt: post.publishedAt });
     } catch (error) {
       emit({ type: "handler-error", message: error.message });
