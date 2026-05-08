@@ -601,6 +601,7 @@
                 <div class="checks">
                   <label><input id="soundEnabled" type="checkbox" checked> 声音提醒</label>
                   <label><input id="memeOnly" type="checkbox" checked> 只抓 meme 币内容</label>
+                  <label><input id="onlyNewPosts" type="checkbox"> 仅看本轮新增</label>
                   <label><input id="aiClassify" type="checkbox"> AI 二次判断</label>
                   <label><input id="headless" type="checkbox" checked> 无头模式</label>
                 </div>
@@ -722,6 +723,7 @@
         "intervalSeconds",
         "soundEnabled",
         "memeOnly",
+        "onlyNewPosts",
         "aiClassify",
         "headless",
         "accountSelect"
@@ -775,6 +777,7 @@
           intervalSeconds: Number(document.getElementById("intervalSeconds").value),
           soundEnabled: document.getElementById("soundEnabled").checked,
           memeOnly: document.getElementById("memeOnly").checked,
+          onlyNewPosts: document.getElementById("onlyNewPosts").checked,
           aiClassify: document.getElementById("aiClassify").checked,
           headless: document.getElementById("headless").checked,
           accountSelect: document.getElementById("accountSelect").value
@@ -918,7 +921,8 @@
 
       function renderFeed(data) {
         state.latest = data;
-        const posts = Array.isArray(data?.newPosts) ? data.newPosts : (data?.posts || []);
+        const onlyNew = document.getElementById("onlyNewPosts").checked;
+        const posts = onlyNew && Array.isArray(data?.newPosts) ? data.newPosts : (data?.posts || []);
         const consensus = data?.consensus || [];
         const consensusHtml = consensus.length ? `
           <div class="consensus-panel">
@@ -932,7 +936,7 @@
         ` : "";
         if (!posts.length) {
           const total = Number(data?.allTotalPosts ?? data?.totalPosts ?? 0);
-          const emptyText = total > 0
+          const emptyText = total > 0 && onlyNew
             ? `本轮无更新。最新抓取匹配 ${total} 条，但没有新增推文。`
             : "还没有推文结果。可从关注列表批量抓取，或在这里点击开始抓取。";
           feedList.innerHTML = `${consensusHtml}<div class="empty">${escapeHtml(emptyText)}</div>`;
@@ -1002,7 +1006,8 @@
       }
 
       function renderActivity(data) {
-        const posts = Array.isArray(data?.newPosts) ? data.newPosts : (data?.posts || []);
+        const onlyNew = document.getElementById("onlyNewPosts").checked;
+        const posts = onlyNew && Array.isArray(data?.newPosts) ? data.newPosts : (data?.posts || []);
         const rows = posts.slice(0, 12).map((post) => {
           const handle = String(post.authorHandle || "").replace(/^@/, "");
           const watcher = state.watchers.find((item) => cleanHandle(item.handle).toLowerCase() === handle.toLowerCase());
@@ -1256,7 +1261,10 @@
         const element = document.getElementById(id);
         if (!element) return;
         element.addEventListener("input", scheduleUiSettingsSave);
-        element.addEventListener("change", scheduleUiSettingsSave);
+        element.addEventListener("change", () => {
+          scheduleUiSettingsSave();
+          if (id === "onlyNewPosts" && state.latest) renderFeed(state.latest);
+        });
       });
 
       await loadAppInfo();

@@ -176,6 +176,7 @@ const defaultUiSettings = {
   intervalSeconds: 180,
   soundEnabled: true,
   memeOnly: true,
+  onlyNewPosts: false,
   aiClassify: false,
   headless: true,
   accountSelect: "__selected__"
@@ -193,6 +194,7 @@ function normalizeUiSettings(value = {}) {
     intervalSeconds: boundedNumber(value.intervalSeconds, defaultUiSettings.intervalSeconds, 30, 3600),
     soundEnabled: value.soundEnabled !== false,
     memeOnly: value.memeOnly !== false,
+    onlyNewPosts: Boolean(value.onlyNewPosts),
     aiClassify: Boolean(value.aiClassify),
     headless: value.headless !== false,
     accountSelect: String(value.accountSelect || defaultUiSettings.accountSelect).slice(0, 80)

@@ -9,6 +9,7 @@
   "intervalSeconds": 600,
   "soundEnabled": true,
   "memeOnly": true,
+  "onlyNewPosts": false,
   "aiClassify": false,
   "headless": true,
   "accountSelect": "__selected__"
