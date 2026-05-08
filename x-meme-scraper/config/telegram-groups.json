@@ -1,8 +1,10 @@
 {
   "groups": [
     {
-      "name": "Example public channel",
-      "target": "telegram"
+      "name": "Telegram",
+      "target": "telegram",
+      "note": "Example public channel",
+      "selected": true
     }
   ]
 }

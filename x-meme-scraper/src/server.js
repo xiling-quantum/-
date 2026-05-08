@@ -10,6 +10,7 @@ const projectRoot = path.resolve(__dirname, "..");
 const publicDir = path.join(projectRoot, "public");
 const configPath = path.join(projectRoot, "config", "bloggers.json");
 const watchersPath = path.join(projectRoot, "config", "watchers.json");
+const telegramGroupsPath = path.join(projectRoot, "config", "telegram-groups.json");
 const uiSettingsPath = path.join(projectRoot, "config", "ui-settings.json");
 const dataDir = path.join(projectRoot, "data");
 const defaultPort = Number(process.env.PORT || 48931);
@@ -162,6 +163,64 @@ async function writeWatchers(watchers) {
   }
   await fs.mkdir(path.dirname(watchersPath), { recursive: true });
   await fs.writeFile(watchersPath, `${JSON.stringify({ watchers: unique }, null, 2)}\n`, "utf8");
+  return unique;
+}
+
+const defaultTelegramGroups = [
+  { name: "Telegram", target: "telegram", note: "Example public channel", selected: true }
+];
+
+function normalizeTelegramTarget(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  let candidate = raw;
+  try {
+    const parsed = new URL(raw);
+    if (/^(?:www\.)?t\.me$/i.test(parsed.hostname)) {
+      candidate = parsed.pathname.split("/").filter(Boolean)[0] ?? "";
+    }
+  } catch {
+    candidate = raw;
+  }
+  return candidate.replace(/^@+/, "").split(/[/?#]/)[0].trim();
+}
+
+function normalizeTelegramGroup(item) {
+  const target = normalizeTelegramTarget(item?.target ?? item?.handle ?? item?.name);
+  if (!target || target.length > 160) return null;
+  return {
+    name: String(item?.name || target).trim().slice(0, 120),
+    target,
+    note: String(item?.note || "").trim().slice(0, 160),
+    selected: item?.selected !== false
+  };
+}
+
+async function readTelegramGroups() {
+  try {
+    const saved = JSON.parse(await fs.readFile(telegramGroupsPath, "utf8"));
+    const groups = (Array.isArray(saved) ? saved : saved.groups)
+      .map(normalizeTelegramGroup)
+      .filter(Boolean);
+    if (groups.length) return groups;
+  } catch {
+    // Fall through to defaults.
+  }
+  return defaultTelegramGroups.map((item) => ({ ...item }));
+}
+
+async function writeTelegramGroups(groups) {
+  const normalized = groups.map(normalizeTelegramGroup).filter(Boolean);
+  const unique = [];
+  const seen = new Set();
+  for (const group of normalized) {
+    const key = group.target.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(group);
+  }
+  await fs.mkdir(path.dirname(telegramGroupsPath), { recursive: true });
+  await fs.writeFile(telegramGroupsPath, `${JSON.stringify({ groups: unique }, null, 2)}\n`, "utf8");
   return unique;
 }
 
@@ -1302,6 +1361,13 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/telegram/groups") {
+      jsonResponse(response, 200, {
+        groups: await readTelegramGroups()
+      });
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/ui-settings") {
       jsonResponse(response, 200, await readUiSettings());
       return;
@@ -1317,6 +1383,13 @@ const server = http.createServer(async (request, response) => {
       const requestBody = await readRequestJson(request);
       const watchers = await writeWatchers(asArray(requestBody?.watchers).length ? requestBody.watchers : []);
       jsonResponse(response, 200, { watchers });
+      return;
+    }
+
+    if (request.method === "PUT" && url.pathname === "/api/telegram/groups") {
+      const requestBody = await readRequestJson(request);
+      const groups = await writeTelegramGroups(asArray(requestBody?.groups).length ? requestBody.groups : []);
+      jsonResponse(response, 200, { groups });
       return;
     }
 

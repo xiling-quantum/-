@@ -529,7 +529,14 @@
 
       .telegram-form {
         display: grid;
-        grid-template-columns: minmax(220px, 1fr) 120px 120px auto;
+        grid-template-columns: minmax(220px, 1fr) minmax(180px, 1fr) auto;
+        gap: 12px;
+        align-items: end;
+      }
+
+      .telegram-controls {
+        display: grid;
+        grid-template-columns: 120px 120px minmax(180px, 1fr) auto auto;
         gap: 12px;
         align-items: end;
       }
@@ -549,6 +556,7 @@
         .filter-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .watch-form { grid-template-columns: 1fr; }
         .telegram-form { grid-template-columns: 1fr; }
+        .telegram-controls { grid-template-columns: 1fr; }
       }
     </style>
   </head>
@@ -707,9 +715,26 @@
               </div>
             </div>
             <div class="telegram-form">
-              <label>群或频道
-                <input id="telegramGroups" placeholder="例如 binance_announcements,group2" autocomplete="off" value="telegram">
+              <label>新增群或频道
+                <input id="newTelegramTarget" placeholder="例如 binance_announcements 或 https://t.me/xxx" autocomplete="off">
               </label>
+              <label>备注
+                <input id="newTelegramNote" placeholder="例如 meme 群 / 官方公告，可留空" autocomplete="off">
+              </label>
+              <button id="telegramAddButton" class="primary" type="button">添加频道</button>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th><input id="telegramHeaderCheck" type="checkbox"></th>
+                  <th>群或频道</th>
+                  <th>备注</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="telegramGroupRows"></tbody>
+            </table>
+            <div class="telegram-controls">
               <label>消息数
                 <input id="telegramMaxMessages" type="number" min="1" max="200" value="50">
               </label>
@@ -721,6 +746,7 @@
                 <input id="telegramQuery" placeholder="可留空">
               </label>
               <label><input id="telegramMemeOnly" type="checkbox" checked> 只抓 meme 内容</label>
+              <button id="telegramSelectAllButton" class="ghost" type="button">全选</button>
               <button id="telegramLoadButton" class="ghost" type="button">刷新结果</button>
             </div>
             <div id="telegramMessage" class="status-box good">Telegram 服务已就绪。</div>
@@ -746,6 +772,7 @@
 
       const state = {
         watchers: defaultWatchers.map((item) => ({ ...item, selected: true })),
+        telegramGroups: [],
         latest: null
       };
 
@@ -767,6 +794,10 @@
       const telegramList = document.getElementById("telegramList");
       const telegramMessage = document.getElementById("telegramMessage");
       const telegramScrapeButton = document.getElementById("telegramScrapeButton");
+      const telegramGroupRows = document.getElementById("telegramGroupRows");
+      const telegramHeaderCheck = document.getElementById("telegramHeaderCheck");
+      const newTelegramTarget = document.getElementById("newTelegramTarget");
+      const newTelegramNote = document.getElementById("newTelegramNote");
       const appTitle = document.getElementById("appTitle");
       const mediaLightbox = document.getElementById("mediaLightbox");
       const mediaLightboxImage = document.getElementById("mediaLightboxImage");
@@ -825,6 +856,40 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ watchers: state.watchers })
         });
+      }
+
+      function cleanTelegramTarget(value) {
+        const raw = String(value || "").trim();
+        if (!raw) return "";
+        try {
+          const parsed = new URL(raw);
+          if (/^(?:www\.)?t\.me$/i.test(parsed.hostname)) {
+            return (parsed.pathname.split("/").filter(Boolean)[0] || "").replace(/^@+/, "");
+          }
+        } catch {}
+        return raw.replace(/^@+/, "").split(/[/?#]/)[0].trim();
+      }
+
+      async function loadTelegramGroups() {
+        try {
+          const response = await fetch(`/api/telegram/groups?t=${Date.now()}`, { cache: "no-store" });
+          const payload = await response.json();
+          state.telegramGroups = Array.isArray(payload.groups) ? payload.groups : [];
+        } catch {
+          state.telegramGroups = [];
+        }
+      }
+
+      async function saveTelegramGroups() {
+        await fetch("/api/telegram/groups", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ groups: state.telegramGroups })
+        });
+      }
+
+      function selectedTelegramGroups() {
+        return state.telegramGroups.filter((item) => item.selected !== false).map((item) => cleanTelegramTarget(item.target)).filter(Boolean);
       }
 
       function readUiSettingsFromForm() {
@@ -1124,7 +1189,7 @@
 
       function readTelegramConfig() {
         return {
-          groups: document.getElementById("telegramGroups").value.split(",").map((item) => item.trim()).filter(Boolean),
+          groups: selectedTelegramGroups(),
           maxMessages: Number(document.getElementById("telegramMaxMessages").value),
           query: document.getElementById("telegramQuery").value.trim(),
           memeOnly: document.getElementById("telegramMemeOnly").checked,
@@ -1140,7 +1205,6 @@
         try {
           const saved = JSON.parse(localStorage.getItem("x-monitor-telegram-form") || "null");
           if (!saved) return;
-          document.getElementById("telegramGroups").value = (saved.groups || []).join(",");
           document.getElementById("telegramMaxMessages").value = String(saved.maxMessages || 50);
           document.getElementById("telegramQuery").value = saved.query || "";
           document.getElementById("telegramMemeOnly").checked = saved.memeOnly !== false;
@@ -1197,6 +1261,26 @@
           return;
         }
         await pollTelegramStatus();
+      }
+
+      function renderTelegramGroups() {
+        telegramHeaderCheck.checked = state.telegramGroups.length > 0 && state.telegramGroups.every((item) => item.selected !== false);
+        telegramGroupRows.innerHTML = state.telegramGroups.map((item, index) => `
+          <tr>
+            <td><input type="checkbox" data-telegram-select="${index}" ${item.selected !== false ? "checked" : ""}></td>
+            <td>
+              <div class="account-cell">
+                <div class="avatar">${escapeHtml(cleanTelegramTarget(item.target).slice(0, 1).toUpperCase() || "T")}</div>
+                <div class="account-name">
+                  <strong>${escapeHtml(item.name || item.target)}</strong>
+                  <span class="handle">${escapeHtml(item.target)}</span>
+                </div>
+              </div>
+            </td>
+            <td class="note"><input class="note-input" data-telegram-note="${index}" value="${escapeHtml(item.note || "")}" placeholder="添加备注"></td>
+            <td><span class="delete" data-telegram-delete="${index}">删除</span></td>
+          </tr>
+        `).join("");
       }
 
       async function loadLatest() {
@@ -1414,7 +1498,53 @@
       scrapeButton.addEventListener("click", () => startScrape(handlesForScrape()));
       telegramScrapeButton.addEventListener("click", startTelegramScrape);
       document.getElementById("telegramLoadButton").addEventListener("click", loadTelegramLatest);
-      ["telegramGroups", "telegramMaxMessages", "telegramQuery", "telegramMemeOnly", "telegramMemeMinScore"].forEach((id) => {
+      document.getElementById("telegramAddButton").addEventListener("click", async () => {
+        const target = cleanTelegramTarget(newTelegramTarget.value);
+        if (!target) {
+          setTelegramStatus("请输入 Telegram 群或频道。", "bad");
+          return;
+        }
+        if (!state.telegramGroups.some((item) => cleanTelegramTarget(item.target).toLowerCase() === target.toLowerCase())) {
+          state.telegramGroups.unshift({ name: target, target, note: newTelegramNote.value.trim(), selected: true });
+          await saveTelegramGroups();
+          renderTelegramGroups();
+        }
+        newTelegramTarget.value = "";
+        newTelegramNote.value = "";
+      });
+      telegramGroupRows.addEventListener("change", async (event) => {
+        const noteIndex = event.target.dataset.telegramNote;
+        if (noteIndex !== undefined) {
+          state.telegramGroups[Number(noteIndex)].note = event.target.value.trim();
+          await saveTelegramGroups();
+          renderTelegramGroups();
+          return;
+        }
+        const index = event.target.dataset.telegramSelect;
+        if (index === undefined) return;
+        state.telegramGroups[Number(index)].selected = event.target.checked;
+        await saveTelegramGroups();
+        renderTelegramGroups();
+      });
+      telegramGroupRows.addEventListener("click", async (event) => {
+        const index = event.target.dataset.telegramDelete;
+        if (index === undefined) return;
+        state.telegramGroups.splice(Number(index), 1);
+        await saveTelegramGroups();
+        renderTelegramGroups();
+      });
+      telegramHeaderCheck.addEventListener("change", async () => {
+        state.telegramGroups.forEach((item) => { item.selected = telegramHeaderCheck.checked; });
+        await saveTelegramGroups();
+        renderTelegramGroups();
+      });
+      document.getElementById("telegramSelectAllButton").addEventListener("click", async () => {
+        const allSelected = state.telegramGroups.every((item) => item.selected !== false);
+        state.telegramGroups.forEach((item) => { item.selected = !allSelected; });
+        await saveTelegramGroups();
+        renderTelegramGroups();
+      });
+      ["telegramMaxMessages", "telegramQuery", "telegramMemeOnly", "telegramMemeMinScore"].forEach((id) => {
         document.getElementById(id).addEventListener("change", saveTelegramForm);
       });
 
@@ -1482,6 +1612,8 @@
       renderWatchers();
       await loadUiSettings();
       loadTelegramForm();
+      await loadTelegramGroups();
+      renderTelegramGroups();
       await loadHistoryDates();
       await loadFeedForSelectedDate();
       await loadTelegramLatest();
