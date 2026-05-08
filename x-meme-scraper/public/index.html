@@ -599,6 +599,11 @@
               <div class="feed-head">
                 <h2>最新推文</h2>
                 <div class="checks">
+                  <label>历史日期
+                    <select id="historyDateSelect">
+                      <option value="__latest__">最新结果</option>
+                    </select>
+                  </label>
                   <label><input id="soundEnabled" type="checkbox" checked> 声音提醒</label>
                   <label><input id="memeOnly" type="checkbox" checked> 只抓 meme 币内容</label>
                   <label><input id="onlyNewPosts" type="checkbox"> 仅看本轮新增</label>
@@ -704,6 +709,7 @@
       const activityList = document.getElementById("activityList");
       const statusNode = document.getElementById("status");
       const scrapeButton = document.getElementById("scrapeButton");
+      const historyDateSelect = document.getElementById("historyDateSelect");
       const monitorInfo = document.getElementById("monitorInfo");
       const appTitle = document.getElementById("appTitle");
       const mediaLightbox = document.getElementById("mediaLightbox");
@@ -1032,6 +1038,31 @@
         return data;
       }
 
+      async function loadHistoryDates() {
+        const response = await fetch(`/api/browser/dates?t=${Date.now()}`, { cache: "no-store" });
+        const payload = await response.json();
+        const current = historyDateSelect.value || "__latest__";
+        historyDateSelect.innerHTML = [
+          '<option value="__latest__">最新结果</option>',
+          ...(payload.dates || []).map((item) =>
+            `<option value="${escapeHtml(item.date)}">${escapeHtml(item.date)} · ${escapeHtml(item.latestTotalPosts)} 条</option>`
+          )
+        ].join("");
+        if ([...historyDateSelect.options].some((option) => option.value === current)) {
+          historyDateSelect.value = current;
+        }
+      }
+
+      async function loadFeedForSelectedDate() {
+        if (historyDateSelect.value === "__latest__") {
+          return loadLatest();
+        }
+        const response = await fetch(`/api/browser/by-date?date=${encodeURIComponent(historyDateSelect.value)}&t=${Date.now()}`, { cache: "no-store" });
+        const data = await response.json();
+        renderFeed(data);
+        return data;
+      }
+
       async function pollStatus() {
         const response = await fetch(`/api/browser/status?t=${Date.now()}`, { cache: "no-store" });
         const status = await response.json();
@@ -1043,7 +1074,7 @@
           return;
         }
         if (status.status === "completed") {
-          const latest = await loadLatest();
+          const latest = await loadFeedForSelectedDate();
           const newTotal = Number(latest?.newTotalPosts ?? latest?.totalPosts ?? status.totalPosts ?? 0);
           const total = Number(latest?.allTotalPosts ?? latest?.totalPosts ?? status.totalPosts ?? 0);
           setStatus(newTotal > 0 ? `抓取完成：匹配 ${total} 条，新增 ${newTotal} 条。` : `抓取完成：匹配 ${total} 条，本轮无更新。`, "good");
@@ -1242,6 +1273,10 @@
         await pollStatus();
       });
 
+      historyDateSelect.addEventListener("change", async () => {
+        await loadFeedForSelectedDate();
+      });
+
       feedList.addEventListener("click", (event) => {
         const src = event.target?.dataset?.mediaSrc;
         if (src) openMedia(src);
@@ -1271,11 +1306,13 @@
       await loadWatchers();
       renderWatchers();
       await loadUiSettings();
-      await loadLatest();
+      await loadHistoryDates();
+      await loadFeedForSelectedDate();
       await loadMonitorStatus();
       await pollStatus();
       setInterval(async () => {
-        await loadLatest();
+        await loadHistoryDates();
+        if (historyDateSelect.value === "__latest__") await loadLatest();
         await loadMonitorStatus();
       }, 5000);
     </script>

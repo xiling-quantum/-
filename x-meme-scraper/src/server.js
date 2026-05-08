@@ -745,6 +745,91 @@ function withNewPostDelta(current, previous) {
   };
 }
 
+function localDateKey(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+async function listBrowserRunDates() {
+  const attempts = uniqueBrowserRunAttempts(await listLoadedBrowserRuns())
+    .filter((run) => Number(run.totalPosts || 0) > 0);
+  const byDate = new Map();
+  for (const run of attempts) {
+    const date = localDateKey(run.generatedAt || run.modifiedAt);
+    if (!date) continue;
+    if (!byDate.has(date)) {
+      byDate.set(date, {
+        date,
+        runCount: 0,
+        latestAt: null,
+        latestFile: null,
+        latestTotalPosts: 0
+      });
+    }
+    const item = byDate.get(date);
+    item.runCount += 1;
+    if (!item.latestAt || String(run.generatedAt || "") > item.latestAt) {
+      item.latestAt = run.generatedAt || null;
+      item.latestFile = run.file;
+      item.latestTotalPosts = run.totalPosts || 0;
+    }
+  }
+  return [...byDate.values()].sort((left, right) => right.date.localeCompare(left.date));
+}
+
+async function readBrowserRunByDate(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ""))) {
+    throw new Error("日期格式无效，应为 YYYY-MM-DD");
+  }
+  const attempts = uniqueBrowserRunAttempts(await listLoadedBrowserRuns())
+    .filter((run) => Number(run.totalPosts || 0) > 0 && localDateKey(run.generatedAt || run.modifiedAt) === date)
+    .sort((left, right) => String(right.generatedAt || "").localeCompare(String(left.generatedAt || "")));
+
+  const postsById = new Map();
+  const accountsByName = new Map();
+  const errors = [];
+  for (const run of attempts) {
+    for (const account of run.accounts || []) {
+      accountsByName.set(account.username, account);
+    }
+    for (const error of run.errors || []) {
+      errors.push(error);
+    }
+    for (const post of run.posts || []) {
+      const key = String(post.id || post.url || "");
+      if (!key || postsById.has(key)) continue;
+      postsById.set(key, post);
+    }
+  }
+
+  const posts = [...postsById.values()]
+    .sort((left, right) => String(right.publishedAt || "").localeCompare(String(left.publishedAt || "")));
+  const consensus = applyCrossValidation(posts, 2);
+  const latest = attempts[0] || null;
+  return {
+    source: "browser-history-date",
+    date,
+    file: latest?.file || null,
+    generatedAt: latest?.generatedAt || null,
+    runCount: attempts.length,
+    totalPosts: posts.length,
+    allTotalPosts: posts.length,
+    newTotalPosts: posts.length,
+    newPosts: posts,
+    usernames: latest?.usernames || [],
+    filters: latest?.filters || {},
+    totalScanned: attempts.reduce((sum, run) => sum + Number(run.totalScanned || 0), 0),
+    accounts: [...accountsByName.values()],
+    consensus,
+    errors,
+    posts
+  };
+}
+
 async function readLatestBrowserRun() {
   const runs = uniqueBrowserRunAttempts(await listLoadedBrowserRuns());
   if (!runs.length) {
@@ -1287,6 +1372,16 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/browser/latest") {
       jsonResponse(response, 200, await readLatestBrowserRun());
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/browser/dates") {
+      jsonResponse(response, 200, { dates: await listBrowserRunDates() });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/browser/by-date") {
+      jsonResponse(response, 200, await readBrowserRunByDate(url.searchParams.get("date")));
       return;
     }
 
