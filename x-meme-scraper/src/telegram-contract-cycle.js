@@ -16,35 +16,22 @@ const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..");
 
 const EXCLUDE_GROUPS = [
-  "群聊消息",
+  "\u7fa4\u804a\u6d88\u606f",
   "CA",
-  "CryptoD全员群｜二娃聚合",
-  "群主发言群",
-  "Huang黄群（二级/MEME）",
-  "二级交易博主点位群",
-  "半小时群聊AI总结",
-  "币安聪明钱实盘｜二娃聚合",
-  "每日总结｜二娃聚合",
-  "所有禁言群",
-  "失眠聚合群交流",
-  "二娃聚合"
+  "CryptoD\u5168\u5458\u7fa4\uff5c\u4e8c\u5a03\u805a\u5408",
+  "\u7fa4\u4e3b\u53d1\u8a00\u7fa4",
+  "Huang\u9ec4\u7fa4\uff08\u4e8c\u7ea7/MEME\uff09",
+  "\u4e8c\u7ea7\u4ea4\u6613\u535a\u4e3b\u70b9\u4f4d\u7fa4",
+  "\u534a\u5c0f\u65f6\u7fa4\u804aAI\u603b\u7ed3",
+  "\u5e01\u5b89\u806a\u660e\u94b1\u5b9e\u76d8\uff5c\u4e8c\u5a03\u805a\u5408",
+  "\u6bcf\u65e5\u603b\u7ed3\uff5c\u4e8c\u5a03\u805a\u5408",
+  "\u6240\u6709\u7981\u8a00\u7fa4",
+  "\u5931\u7720\u805a\u5408\u7fa4\u4ea4\u6d41",
+  "\u4e8c\u5a03\u805a\u5408"
 ];
 
 function csvCell(value) {
   return `"${String(value ?? "").replaceAll('"', '""')}"`;
-}
-
-function infoLines(info = {}) {
-  const lines = [];
-  if (info.ticker) lines.push(`Ticker: ${info.ticker}`);
-  if (info.name) lines.push(`Name: ${String(info.name).slice(0, 80)}`);
-  if (info.marketCap) lines.push(`MC: ${info.marketCap}`);
-  if (info.liquidity) lines.push(`Liq: ${info.liquidity}`);
-  if (info.holders) lines.push(`Holders: ${info.holders}`);
-  if (info.volume24h) lines.push(`Vol24h: ${info.volume24h}`);
-  if (info.change24h) lines.push(`24h: ${info.change24h}`);
-  if (info.narrative) lines.push(`Narrative: ${String(info.narrative).slice(0, 140)}`);
-  return lines;
 }
 
 function mark(value) {
@@ -56,12 +43,12 @@ function mark(value) {
 function formatContractCards(payload) {
   const cards = buildContractCards(payload, 20);
   const lines = [
-    "[Telegram CA 监控 - 30分钟更新]",
-    "仅展示消息中能提取到的字段。",
-    `有效群/频道: ${payload.targets?.length || 0}`,
-    `含 CA 消息: ${payload.totalPosts || 0}`,
-    `重复 CA 数: ${payload.contractSummary?.length || 0}`,
-    `生成时间: ${payload.generatedAt || new Date().toISOString()}`,
+    "\u005bTelegram CA \u76d1\u63a7 - 30\u5206\u949f\u66f4\u65b0\u005d",
+    "\u4ec5\u5c55\u793a\u6d88\u606f\u4e2d\u80fd\u63d0\u53d6\u5230\u7684\u5b57\u6bb5\u3002",
+    `\u6709\u6548\u7fa4/\u9891\u9053: ${payload.targets?.length || 0}`,
+    `\u542b CA \u6d88\u606f: ${payload.totalPosts || 0}`,
+    `\u91cd\u590d CA \u6570: ${payload.contractSummary?.length || 0}`,
+    `\u751f\u6210\u65f6\u95f4: ${payload.generatedAt || new Date().toISOString()}`,
     ""
   ];
 
@@ -73,28 +60,28 @@ function formatContractCards(payload) {
     lines.push(`#${String(card.rank).padStart(2, "0")} | ${card.count}x | ${titleParts.join(" - ") || "UNKNOWN"}`);
     lines.push(`CA: ${card.address}`);
     lines.push("");
-    lines.push("交易信息:");
-    if (card.age) lines.push(`- 开盘时间: ${card.age}`);
-    if (card.marketCap) lines.push(`- 市值: ${card.marketCap}`);
-    if (card.liquidity) lines.push(`- 流动性: ${card.liquidity}`);
-    if (card.holders) lines.push(`- 持有人: ${card.holders}`);
-    if (card.volume24h) lines.push(`- 24h 交易量: ${card.volume24h}`);
+    lines.push("\u4ea4\u6613\u4fe1\u606f:");
+    if (card.age) lines.push(`- \u5f00\u76d8\u65f6\u95f4: ${card.age}`);
+    if (card.marketCap) lines.push(`- \u5e02\u503c: ${card.marketCap}`);
+    if (card.liquidity) lines.push(`- \u6d41\u52a8\u6027: ${card.liquidity}`);
+    if (card.holders) lines.push(`- \u6301\u6709\u4eba: ${card.holders}`);
+    if (card.volume24h) lines.push(`- 24h \u4ea4\u6613\u91cf: ${card.volume24h}`);
     if (card.change24h) lines.push(`- 24h: ${card.change24h}`);
-    lines.push(`- 链接: gmgn ${mark(card.hasGmgn)} | dex ${mark(card.hasDexscreener)} | 官网 ${mark(card.hasWebsite)} | 推特 ${mark(card.hasTwitter)}`);
+    lines.push(`- \u94fe\u63a5: gmgn ${mark(card.hasGmgn)} | dex ${mark(card.hasDexscreener)} | \u5b98\u7f51 ${mark(card.hasWebsite)} | \u63a8\u7279 ${mark(card.hasTwitter)}`);
     if (card.narrative) {
       lines.push("");
-      lines.push("叙事:");
+      lines.push("\u53d9\u4e8b:");
       lines.push(card.narrative);
     }
     lines.push("");
-    lines.push(`本轮提及次数: ${card.count}`);
-    lines.push(`来源群: ${(card.groups || []).join(" / ")}`);
-    if (card.url) lines.push(`来源链接: ${card.url}`);
+    lines.push(`\u672c\u8f6e\u63d0\u53ca\u6b21\u6570: ${card.count}`);
+    lines.push(`\u6765\u6e90\u7fa4: ${(card.groups || []).join(" / ")}`);
+    if (card.url) lines.push(`\u6765\u6e90\u94fe\u63a5: ${card.url}`);
     lines.push("");
   }
 
   if (!cards.length) {
-    lines.push("本轮没有发现重复 CA。");
+    lines.push("\u672c\u8f6e\u6ca1\u6709\u53d1\u73b0\u91cd\u590d CA\u3002");
   }
   return lines.join("\n");
 }
@@ -122,7 +109,10 @@ function runScrape() {
     });
     let stdout = "";
     let stderr = "";
+    let settled = false;
     const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
       child.kill("SIGTERM");
       const error = new Error("telegram contract cycle timed out");
       error.stdout = stdout;
@@ -137,10 +127,14 @@ function runScrape() {
       stderr += chunk.toString("utf8");
     });
     child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       reject(error);
     });
     child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       const jsonPath = stdout.match(/JSON:\s*(.+\.json)/)?.[1]?.trim();
       if (code !== 0 && !jsonPath) {
@@ -200,7 +194,7 @@ async function main() {
   if (!result.jsonPath) throw new Error("Telegram scrape completed but no JSON output path was found.");
   const payload = JSON.parse(await fs.readFile(result.jsonPath, "utf8"));
   const duplicateCsv = await writeDuplicateCsv(payload, result.jsonPath);
-  await notify(`${formatContractCards(payload)}\n完整 CSV: ${path.basename(duplicateCsv)}`);
+  await notify(`${formatContractCards(payload)}\n\u5b8c\u6574 CSV: ${path.basename(duplicateCsv)}`);
   console.log(`Telegram contract cycle complete: ${result.jsonPath}`);
   console.log(`Duplicate CSV: ${duplicateCsv}`);
 }
