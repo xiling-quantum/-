@@ -40,49 +40,39 @@ function mark(value) {
   return "UNKNOWN";
 }
 
+function formatContractCard(card) {
+  const lines = [];
+  const titleParts = [];
+  if (card.ticker) titleParts.push(`$${card.ticker}`);
+  if (card.name && card.name !== card.ticker) titleParts.push(card.name);
+  if (card.chain) titleParts.push(card.chain);
+  lines.push(`#${String(card.rank).padStart(2, "0")} | ${card.count}x | ${titleParts.join(" - ") || "UNKNOWN"}`);
+  lines.push(`CA: ${card.address}`);
+  lines.push("");
+  lines.push("\u4ea4\u6613\u4fe1\u606f:");
+  if (card.age) lines.push(`- \u5f00\u76d8\u65f6\u95f4: ${card.age}`);
+  if (card.marketCap) lines.push(`- \u5e02\u503c: ${card.marketCap}`);
+  if (card.liquidity) lines.push(`- \u6d41\u52a8\u6027: ${card.liquidity}`);
+  if (card.holders) lines.push(`- \u6301\u6709\u4eba: ${card.holders}`);
+  if (card.volume24h) lines.push(`- 24h \u4ea4\u6613\u91cf: ${card.volume24h}`);
+  if (card.change24h) lines.push(`- 24h: ${card.change24h}`);
+  lines.push(`- \u94fe\u63a5: gmgn ${mark(card.hasGmgn)} | dex ${mark(card.hasDexscreener)} | \u5b98\u7f51 ${mark(card.hasWebsite)} | \u63a8\u7279 ${mark(card.hasTwitter)}`);
+  if (card.narrative) {
+    lines.push("");
+    lines.push("\u53d9\u4e8b:");
+    lines.push(card.narrative);
+  }
+  lines.push("");
+  lines.push(`\u672c\u8f6e\u63d0\u53ca\u6b21\u6570: ${card.count}`);
+  lines.push(`\u6765\u6e90\u7fa4: ${(card.groups || []).join(" / ")}`);
+  if (card.url) lines.push(`\u6765\u6e90\u94fe\u63a5: ${card.url}`);
+  return lines.join("\n");
+}
+
 function formatContractCards(payload) {
   const cards = buildContractCards(payload, 20);
-  const lines = [
-    "\u005bTelegram CA \u76d1\u63a7 - 30\u5206\u949f\u66f4\u65b0\u005d",
-    "\u4ec5\u5c55\u793a\u6d88\u606f\u4e2d\u80fd\u63d0\u53d6\u5230\u7684\u5b57\u6bb5\u3002",
-    `\u6709\u6548\u7fa4/\u9891\u9053: ${payload.targets?.length || 0}`,
-    `\u542b CA \u6d88\u606f: ${payload.totalPosts || 0}`,
-    `\u91cd\u590d CA \u6570: ${payload.contractSummary?.length || 0}`,
-    ""
-  ];
-
-  for (const card of cards) {
-    const titleParts = [];
-    if (card.ticker) titleParts.push(`$${card.ticker}`);
-    if (card.name && card.name !== card.ticker) titleParts.push(card.name);
-    if (card.chain) titleParts.push(card.chain);
-    lines.push(`#${String(card.rank).padStart(2, "0")} | ${card.count}x | ${titleParts.join(" - ") || "UNKNOWN"}`);
-    lines.push(`CA: ${card.address}`);
-    lines.push("");
-    lines.push("\u4ea4\u6613\u4fe1\u606f:");
-    if (card.age) lines.push(`- \u5f00\u76d8\u65f6\u95f4: ${card.age}`);
-    if (card.marketCap) lines.push(`- \u5e02\u503c: ${card.marketCap}`);
-    if (card.liquidity) lines.push(`- \u6d41\u52a8\u6027: ${card.liquidity}`);
-    if (card.holders) lines.push(`- \u6301\u6709\u4eba: ${card.holders}`);
-    if (card.volume24h) lines.push(`- 24h \u4ea4\u6613\u91cf: ${card.volume24h}`);
-    if (card.change24h) lines.push(`- 24h: ${card.change24h}`);
-    lines.push(`- \u94fe\u63a5: gmgn ${mark(card.hasGmgn)} | dex ${mark(card.hasDexscreener)} | \u5b98\u7f51 ${mark(card.hasWebsite)} | \u63a8\u7279 ${mark(card.hasTwitter)}`);
-    if (card.narrative) {
-      lines.push("");
-      lines.push("\u53d9\u4e8b:");
-      lines.push(card.narrative);
-    }
-    lines.push("");
-    lines.push(`\u672c\u8f6e\u63d0\u53ca\u6b21\u6570: ${card.count}`);
-    lines.push(`\u6765\u6e90\u7fa4: ${(card.groups || []).join(" / ")}`);
-    if (card.url) lines.push(`\u6765\u6e90\u94fe\u63a5: ${card.url}`);
-    lines.push("");
-  }
-
-  if (!cards.length) {
-    lines.push("\u672c\u8f6e\u6ca1\u6709\u53d1\u73b0\u91cd\u590d CA\u3002");
-  }
-  return lines.join("\n");
+  if (!cards.length) return ["\u672c\u8f6e\u6ca1\u6709\u53d1\u73b0\u91cd\u590d CA\u3002"];
+  return cards.map(formatContractCard);
 }
 
 function runScrape() {
@@ -188,12 +178,32 @@ async function notify(text) {
   }
 }
 
+async function notifyMany(messages) {
+  const apiId = Number(process.env.TELEGRAM_API_ID || 0);
+  const apiHash = String(process.env.TELEGRAM_API_HASH || "").trim();
+  const stringSession = String(process.env.TELEGRAM_STRING_SESSION || "").trim();
+  if (!apiId || !apiHash || !stringSession) throw new Error("Telegram session config is missing.");
+  const client = new TelegramClient(new StringSession(stringSession), apiId, apiHash, {
+    connectionRetries: 5,
+    proxy: parseSocksProxy(process.env.TELEGRAM_PROXY_URL)
+  });
+  await client.connect();
+  try {
+    for (const message of messages) {
+      await sendTelegramNotification(client, message);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  } finally {
+    await client.disconnect();
+  }
+}
+
 async function main() {
   const result = await runScrape();
   if (!result.jsonPath) throw new Error("Telegram scrape completed but no JSON output path was found.");
   const payload = JSON.parse(await fs.readFile(result.jsonPath, "utf8"));
   const duplicateCsv = await writeDuplicateCsv(payload, result.jsonPath);
-  await notify(`${formatContractCards(payload)}\n\u5b8c\u6574 CSV: ${path.basename(duplicateCsv)}`);
+  await notifyMany(formatContractCards(payload));
   console.log(`Telegram contract cycle complete: ${result.jsonPath}`);
   console.log(`Duplicate CSV: ${duplicateCsv}`);
 }
