@@ -56,12 +56,12 @@ function mark(value) {
 function formatContractCards(payload) {
   const cards = buildContractCards(payload, 20);
   const lines = [
-    "[Telegram CA Cards - 30m Update]",
-    "Only fields found in messages are shown.",
-    `Valid channels: ${payload.targets?.length || 0}`,
-    `CA messages: ${payload.totalPosts || 0}`,
-    `Repeated CA count: ${payload.contractSummary?.length || 0}`,
-    `Generated: ${payload.generatedAt || new Date().toISOString()}`,
+    "[Telegram CA 监控 - 30分钟更新]",
+    "仅展示消息中能提取到的字段。",
+    `有效群/频道: ${payload.targets?.length || 0}`,
+    `含 CA 消息: ${payload.totalPosts || 0}`,
+    `重复 CA 数: ${payload.contractSummary?.length || 0}`,
+    `生成时间: ${payload.generatedAt || new Date().toISOString()}`,
     ""
   ];
 
@@ -73,28 +73,28 @@ function formatContractCards(payload) {
     lines.push(`#${String(card.rank).padStart(2, "0")} | ${card.count}x | ${titleParts.join(" - ") || "UNKNOWN"}`);
     lines.push(`CA: ${card.address}`);
     lines.push("");
-    lines.push("Trade info:");
-    if (card.age) lines.push(`- Age: ${card.age}`);
-    if (card.marketCap) lines.push(`- MC: ${card.marketCap}`);
-    if (card.liquidity) lines.push(`- Liquidity: ${card.liquidity}`);
-    if (card.holders) lines.push(`- Holders: ${card.holders}`);
-    if (card.volume24h) lines.push(`- Vol24h: ${card.volume24h}`);
+    lines.push("交易信息:");
+    if (card.age) lines.push(`- 开盘时间: ${card.age}`);
+    if (card.marketCap) lines.push(`- 市值: ${card.marketCap}`);
+    if (card.liquidity) lines.push(`- 流动性: ${card.liquidity}`);
+    if (card.holders) lines.push(`- 持有人: ${card.holders}`);
+    if (card.volume24h) lines.push(`- 24h 交易量: ${card.volume24h}`);
     if (card.change24h) lines.push(`- 24h: ${card.change24h}`);
-    lines.push(`- Links: gmgn ${mark(card.hasGmgn)} | dex ${mark(card.hasDexscreener)} | website ${mark(card.hasWebsite)} | twitter ${mark(card.hasTwitter)}`);
+    lines.push(`- 链接: gmgn ${mark(card.hasGmgn)} | dex ${mark(card.hasDexscreener)} | 官网 ${mark(card.hasWebsite)} | 推特 ${mark(card.hasTwitter)}`);
     if (card.narrative) {
       lines.push("");
-      lines.push("Narrative:");
+      lines.push("叙事:");
       lines.push(card.narrative);
     }
     lines.push("");
-    lines.push(`48h mentions: ${card.count}`);
-    lines.push(`Groups: ${(card.groups || []).join(" / ")}`);
-    if (card.url) lines.push(`Source: ${card.url}`);
+    lines.push(`本轮提及次数: ${card.count}`);
+    lines.push(`来源群: ${(card.groups || []).join(" / ")}`);
+    if (card.url) lines.push(`来源链接: ${card.url}`);
     lines.push("");
   }
 
   if (!cards.length) {
-    lines.push("No repeated CA found in this cycle.");
+    lines.push("本轮没有发现重复 CA。");
   }
   return lines.join("\n");
 }
@@ -200,7 +200,7 @@ async function main() {
   if (!result.jsonPath) throw new Error("Telegram scrape completed but no JSON output path was found.");
   const payload = JSON.parse(await fs.readFile(result.jsonPath, "utf8"));
   const duplicateCsv = await writeDuplicateCsv(payload, result.jsonPath);
-  await notify(`${formatContractCards(payload)}\nFull CSV: ${path.basename(duplicateCsv)}`);
+  await notify(`${formatContractCards(payload)}\n完整 CSV: ${path.basename(duplicateCsv)}`);
   console.log(`Telegram contract cycle complete: ${result.jsonPath}`);
   console.log(`Duplicate CSV: ${duplicateCsv}`);
 }
