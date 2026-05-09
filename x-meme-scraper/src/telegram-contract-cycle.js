@@ -7,6 +7,7 @@ import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
 import { loadLocalEnv, parseSocksProxy } from "./local-env.js";
 import { sendTelegramNotification } from "./telegram-notify.js";
+import { buildContractCards } from "./telegram-contracts.js";
 
 loadLocalEnv();
 
@@ -46,28 +47,53 @@ function infoLines(info = {}) {
   return lines;
 }
 
-function formatRanking(payload) {
-  const summary = Array.isArray(payload.contractSummary) ? payload.contractSummary : [];
+function mark(value) {
+  if (value === "yes" || value === true) return "OK";
+  if (value === "no" || value === false) return "NO";
+  return "UNKNOWN";
+}
+
+function formatContractCards(payload) {
+  const cards = buildContractCards(payload, 20);
   const lines = [
-    "[Telegram CA Ranking - 30m Update]",
+    "[Telegram CA Cards - 30m Update]",
     "Only fields found in messages are shown.",
     `Valid channels: ${payload.targets?.length || 0}`,
     `CA messages: ${payload.totalPosts || 0}`,
-    `Repeated CA count: ${summary.length}`,
+    `Repeated CA count: ${payload.contractSummary?.length || 0}`,
     `Generated: ${payload.generatedAt || new Date().toISOString()}`,
     ""
   ];
 
-  for (let index = 0; index < Math.min(20, summary.length); index += 1) {
-    const item = summary[index];
-    lines.push(`#${String(index + 1).padStart(2, "0")} | ${item.count}x | ${item.address}`);
-    const details = infoLines(item.info);
-    if (details.length) lines.push(...details.map((line) => `  ${line}`));
-    lines.push(`  Groups: ${(item.groups || []).join(" / ")}`);
+  for (const card of cards) {
+    const titleParts = [];
+    if (card.ticker) titleParts.push(`$${card.ticker}`);
+    if (card.name && card.name !== card.ticker) titleParts.push(card.name);
+    if (card.chain) titleParts.push(card.chain);
+    lines.push(`#${String(card.rank).padStart(2, "0")} | ${card.count}x | ${titleParts.join(" - ") || "UNKNOWN"}`);
+    lines.push(`CA: ${card.address}`);
+    lines.push("");
+    lines.push("Trade info:");
+    if (card.age) lines.push(`- Age: ${card.age}`);
+    if (card.marketCap) lines.push(`- MC: ${card.marketCap}`);
+    if (card.liquidity) lines.push(`- Liquidity: ${card.liquidity}`);
+    if (card.holders) lines.push(`- Holders: ${card.holders}`);
+    if (card.volume24h) lines.push(`- Vol24h: ${card.volume24h}`);
+    if (card.change24h) lines.push(`- 24h: ${card.change24h}`);
+    lines.push(`- Links: gmgn ${mark(card.hasGmgn)} | dex ${mark(card.hasDexscreener)} | website ${mark(card.hasWebsite)} | twitter ${mark(card.hasTwitter)}`);
+    if (card.narrative) {
+      lines.push("");
+      lines.push("Narrative:");
+      lines.push(card.narrative);
+    }
+    lines.push("");
+    lines.push(`48h mentions: ${card.count}`);
+    lines.push(`Groups: ${(card.groups || []).join(" / ")}`);
+    if (card.url) lines.push(`Source: ${card.url}`);
     lines.push("");
   }
 
-  if (!summary.length) {
+  if (!cards.length) {
     lines.push("No repeated CA found in this cycle.");
   }
   return lines.join("\n");
@@ -174,7 +200,7 @@ async function main() {
   if (!result.jsonPath) throw new Error("Telegram scrape completed but no JSON output path was found.");
   const payload = JSON.parse(await fs.readFile(result.jsonPath, "utf8"));
   const duplicateCsv = await writeDuplicateCsv(payload, result.jsonPath);
-  await notify(`${formatRanking(payload)}\nFull CSV: ${path.basename(duplicateCsv)}`);
+  await notify(`${formatContractCards(payload)}\nFull CSV: ${path.basename(duplicateCsv)}`);
   console.log(`Telegram contract cycle complete: ${result.jsonPath}`);
   console.log(`Duplicate CSV: ${duplicateCsv}`);
 }
