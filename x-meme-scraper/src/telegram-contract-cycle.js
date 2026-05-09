@@ -48,7 +48,6 @@ function formatContractCards(payload) {
     `\u6709\u6548\u7fa4/\u9891\u9053: ${payload.targets?.length || 0}`,
     `\u542b CA \u6d88\u606f: ${payload.totalPosts || 0}`,
     `\u91cd\u590d CA \u6570: ${payload.contractSummary?.length || 0}`,
-    `\u751f\u6210\u65f6\u95f4: ${payload.generatedAt || new Date().toISOString()}`,
     ""
   ];
 
