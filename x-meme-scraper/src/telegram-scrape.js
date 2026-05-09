@@ -6,7 +6,7 @@ import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
 import { loadLocalEnv, parseSocksProxy } from "./local-env.js";
 import { formatTelegramBatchNotification, sendTelegramNotification, telegramNotifyConfigured } from "./telegram-notify.js";
-import { annotateRepeatedContracts, extractContractAddresses } from "./telegram-contracts.js";
+import { annotateRepeatedContracts, extractContractAddresses, extractTokenInfo } from "./telegram-contracts.js";
 
 loadLocalEnv();
 
@@ -197,6 +197,7 @@ async function main() {
           const text = message.message || "";
           const contractAddresses = extractContractAddresses(text);
           if (contractOnly && !contractAddresses.length) continue;
+          const tokenInfo = extractTokenInfo(text);
           const sender = await messageSenderInfo(message);
           if (resolvedSenders.ids.size && !resolvedSenders.ids.has(sender.senderId)) continue;
           if (!textMatches(text, query)) continue;
@@ -215,6 +216,7 @@ async function main() {
             text,
             memeScore: score,
             contractAddresses,
+            tokenInfo,
             url: messageUrl(target, message.id),
             scrapedAt: new Date().toISOString()
           });
@@ -244,7 +246,7 @@ async function main() {
 
     await fs.writeFile(jsonPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
     const csvRows = [
-      ["id", "group", "senderId", "senderUsername", "publishedAt", "memeScore", "contractAddresses", "repeatedContracts", "text", "url", "scrapedAt"].map(csvCell).join(","),
+      ["id", "group", "senderId", "senderUsername", "publishedAt", "memeScore", "contractAddresses", "repeatedContracts", "ticker", "name", "marketCap", "liquidity", "holders", "volume24h", "change24h", "narrative", "text", "url", "scrapedAt"].map(csvCell).join(","),
       ...posts.map((post) => [
         post.id,
         post.group,
@@ -254,6 +256,14 @@ async function main() {
         post.memeScore,
         (post.contractAddresses || []).join(" "),
         (post.repeatedContracts || []).join(" "),
+        post.tokenInfo?.ticker || "",
+        post.tokenInfo?.name || "",
+        post.tokenInfo?.marketCap || "",
+        post.tokenInfo?.liquidity || "",
+        post.tokenInfo?.holders || "",
+        post.tokenInfo?.volume24h || "",
+        post.tokenInfo?.change24h || "",
+        post.tokenInfo?.narrative || "",
         post.text,
         post.url,
         post.scrapedAt
