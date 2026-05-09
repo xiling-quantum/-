@@ -1047,8 +1047,11 @@ async function collectWithTelegram(requestBody) {
   const maxMessages = boundedNumber(requestBody?.maxMessages, 50, 1, 200);
   const query = String(requestBody?.query ?? "").trim();
   const senders = asArray(requestBody?.senders).map((item) => String(item).trim()).filter(Boolean);
+  const excludeGroups = asArray(requestBody?.excludeGroups).map((item) => String(item).trim()).filter(Boolean);
   const memeOnly = Boolean(requestBody?.memeOnly);
   const memeMinScore = boundedNumber(requestBody?.memeMinScore, 2, 1, 8);
+  const contractOnly = Boolean(requestBody?.contractOnly);
+  const allDialogs = Boolean(requestBody?.allDialogs);
   const scriptPath = path.join(projectRoot, "src", "telegram-scrape.js");
   const args = [
     scriptPath,
@@ -1057,11 +1060,16 @@ async function collectWithTelegram(requestBody) {
     "--memeOnly",
     String(memeOnly),
     "--memeMinScore",
-    String(memeMinScore)
+    String(memeMinScore),
+    "--contractOnly",
+    String(contractOnly),
+    "--allDialogs",
+    String(allDialogs)
   ];
   if (groups.length) args.push("--groups", groups.join(","));
   if (query) args.push("--query", query);
   if (senders.length) args.push("--senders", senders.join(","));
+  if (excludeGroups.length) args.push("--excludeGroups", excludeGroups.join(","));
 
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, {

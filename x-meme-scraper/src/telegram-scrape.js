@@ -6,6 +6,7 @@ import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
 import { loadLocalEnv, parseSocksProxy } from "./local-env.js";
 import { formatTelegramBatchNotification, sendTelegramNotification, telegramNotifyConfigured } from "./telegram-notify.js";
+import { annotateRepeatedContracts, extractContractAddresses } from "./telegram-contracts.js";
 
 loadLocalEnv();
 
@@ -30,6 +31,10 @@ function listArg(name) {
   const raw = String(argValue(name, "") ?? "").trim();
   if (!raw) return [];
   return raw.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function booleanArg(name, fallback = false) {
+  return String(argValue(name, String(fallback))).trim().toLowerCase() === "true";
 }
 
 function normalizeSenderFilter(value) {
@@ -72,6 +77,27 @@ async function readTargets() {
   if (cliTargets.length) return cliTargets;
   const config = JSON.parse(await fs.readFile(configPath, "utf8"));
   return (config.groups ?? []).map((group) => normalizeTarget(group.target)).filter(Boolean);
+}
+
+function targetLabel(entity) {
+  return normalizeTarget(entity?.username || entity?.title || entity?.firstName || entity?.id || "");
+}
+
+async function readDialogTargets(client, excludeGroups) {
+  const excluded = excludeGroups.map((item) => String(item || "").toLowerCase()).filter(Boolean);
+  const dialogs = await client.getDialogs({});
+  return dialogs
+    .map((dialog) => dialog.entity)
+    .filter((entity) => entity && (entity.className === "Channel" || entity.className === "Chat"))
+    .map((entity) => ({
+      target: targetLabel(entity),
+      entity,
+      title: String(entity.title || entity.username || entity.firstName || entity.id || "")
+    }))
+    .filter((item) => item.target)
+    .filter((item) => !excluded.some((needle) =>
+      item.target.toLowerCase().includes(needle) || item.title.toLowerCase().includes(needle)
+    ));
 }
 
 function messageUrl(target, id) {
@@ -124,15 +150,18 @@ async function main() {
   const proxy = parseSocksProxy(process.env.TELEGRAM_PROXY_URL);
   const maxMessages = Math.max(1, Math.min(200, Number(argValue("max", "50")) || 50));
   const query = String(argValue("query", "") ?? "").trim();
-  const memeOnly = argValue("memeOnly", "false") === "true";
+  const memeOnly = booleanArg("memeOnly", false);
   const memeMinScore = Math.max(1, Math.min(8, Number(argValue("memeMinScore", "2")) || 2));
+  const contractOnly = booleanArg("contractOnly", false);
+  const allDialogs = booleanArg("allDialogs", false);
+  const excludeGroups = listArg("excludeGroups").map(normalizeTarget);
   const senderFilters = listArg("senders").map(normalizeSenderFilter).filter(Boolean);
-  const targets = await readTargets();
+  const configuredTargets = await readTargets();
 
   if (!apiId || !apiHash || !stringSession) {
     throw new Error("Set TELEGRAM_API_ID, TELEGRAM_API_HASH, and TELEGRAM_STRING_SESSION before scraping Telegram.");
   }
-  if (!targets.length) {
+  if (!allDialogs && !configuredTargets.length) {
     throw new Error("No Telegram groups configured. Use --groups group1,group2 or edit config/telegram-groups.json.");
   }
 
@@ -144,19 +173,30 @@ async function main() {
   });
   await client.connect();
   const resolvedSenders = await resolveSenderFilters(client, senderFilters);
+  const targetItems = allDialogs
+    ? await readDialogTargets(client, excludeGroups)
+    : configuredTargets.map((target) => ({ target, entity: null, title: target }));
+  const targets = targetItems.map((item) => item.target);
+
+  if (!targetItems.length) {
+    throw new Error("No Telegram groups matched the current selection.");
+  }
 
   try {
     const accounts = [];
     const errors = [];
     const posts = [];
 
-    for (const target of targets) {
+    for (const item of targetItems) {
+      const target = item.target;
       try {
-        const entity = await client.getEntity(target);
+        const entity = item.entity || await client.getEntity(target);
         const messages = await client.getMessages(entity, { limit: maxMessages });
         let matched = 0;
         for (const message of messages) {
           const text = message.message || "";
+          const contractAddresses = extractContractAddresses(text);
+          if (contractOnly && !contractAddresses.length) continue;
           const sender = await messageSenderInfo(message);
           if (resolvedSenders.ids.size && !resolvedSenders.ids.has(sender.senderId)) continue;
           if (!textMatches(text, query)) continue;
@@ -174,6 +214,7 @@ async function main() {
             publishedAt: message.date ? new Date(message.date * 1000).toISOString() : null,
             text,
             memeScore: score,
+            contractAddresses,
             url: messageUrl(target, message.id),
             scrapedAt: new Date().toISOString()
           });
@@ -185,15 +226,17 @@ async function main() {
     }
 
     posts.sort((left, right) => String(right.publishedAt || "").localeCompare(String(left.publishedAt || "")));
+    const contractSummary = annotateRepeatedContracts(posts);
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const jsonPath = path.join(dataDir, `telegram-monitor-${timestamp}.json`);
     const csvPath = path.join(dataDir, `telegram-monitor-${timestamp}.csv`);
     const payload = {
       source: "telegram",
       targets,
-      filters: { query, memeOnly, memeMinScore, maxMessages, senderFilters, senderIds: [...resolvedSenders.ids], unresolvedSenders: resolvedSenders.unresolved },
+      filters: { query, memeOnly, memeMinScore, maxMessages, senderFilters, senderIds: [...resolvedSenders.ids], unresolvedSenders: resolvedSenders.unresolved, contractOnly, allDialogs, excludeGroups },
       generatedAt: new Date().toISOString(),
       totalPosts: posts.length,
+      contractSummary,
       accounts,
       errors,
       posts
@@ -201,7 +244,7 @@ async function main() {
 
     await fs.writeFile(jsonPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
     const csvRows = [
-      ["id", "group", "senderId", "senderUsername", "publishedAt", "memeScore", "text", "url", "scrapedAt"].map(csvCell).join(","),
+      ["id", "group", "senderId", "senderUsername", "publishedAt", "memeScore", "contractAddresses", "repeatedContracts", "text", "url", "scrapedAt"].map(csvCell).join(","),
       ...posts.map((post) => [
         post.id,
         post.group,
@@ -209,6 +252,8 @@ async function main() {
         post.senderUsername,
         post.publishedAt,
         post.memeScore,
+        (post.contractAddresses || []).join(" "),
+        (post.repeatedContracts || []).join(" "),
         post.text,
         post.url,
         post.scrapedAt
