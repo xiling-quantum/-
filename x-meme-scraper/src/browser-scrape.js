@@ -86,6 +86,8 @@ const MEME_SIGNALS = [
   { pattern: /\bfair\s*launch\b/i, weight: 2, reason: "fair launch" },
   { pattern: /\$[A-Z][A-Z0-9_]{1,11}\b/, weight: 1, reason: "cashtag" },
   { pattern: /\b(pepe|doge|shib|bonk|wif|floki|popcat|mog|giga)\b/i, weight: 2, reason: "known meme ticker" },
+  { pattern: /土狗|迷因|meme\s*币|迷因币|合约地址|冲土狗|发射|开盘|打新|金狗|百倍|千倍/i, weight: 2, reason: "中文 meme 信号" },
+  { pattern: /市值|流动性|链上|持仓|聪明钱|土狗盘|内盘|外盘|CA[:：\s]/i, weight: 1, reason: "中文交易信号" },
   { pattern: /土狗|迷因|meme币|合约地址|冲土狗|发射/i, weight: 2, reason: "中文 meme 信号" }
 ];
 
@@ -476,12 +478,13 @@ async function selectPostsTab(page) {
   await tab.click({ timeout: 3000 }).catch(() => {});
 }
 
-async function saveDebugSnapshot(page, username) {
-  if (argValue("debug", "false") !== "true") return;
+async function saveDebugSnapshot(page, username, reason = "debug", force = false) {
+  if (!force && argValue("debug", "false") !== "true") return;
   await fs.mkdir(dataDir, { recursive: true });
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const textPath = path.join(dataDir, `debug-${username}-${timestamp}.txt`);
-  const pngPath = path.join(dataDir, `debug-${username}-${timestamp}.png`);
+  const safeReason = String(reason).replace(/[^a-z0-9_-]/gi, "-").toLowerCase();
+  const textPath = path.join(dataDir, `debug-${safeReason}-${username}-${timestamp}.txt`);
+  const pngPath = path.join(dataDir, `debug-${safeReason}-${username}-${timestamp}.png`);
   const bodyText = await page.locator("body").innerText({ timeout: 5000 }).catch((error) => error.message);
   await fs.writeFile(textPath, bodyText, "utf8");
   await page.screenshot({ path: pngPath, fullPage: false }).catch(() => {});
@@ -493,15 +496,28 @@ async function extractPosts(page, username, maxPosts) {
   return page.locator("article").evaluateAll(
     (articles, args) => {
       const { username: targetUsername, maxPosts: limit } = args;
+      const targetUsernameLower = targetUsername.toLowerCase();
       const unique = new Map();
 
-      for (const article of articles) {
-        const statusLink = [...article.querySelectorAll('a[href*="/status/"]')]
-          .map((link) => link.href)
-          .find((href) => href.includes(`/${targetUsername}/status/`) || href.includes("/status/"));
-        if (!statusLink) continue;
+      const parseStatusLink = (href) => {
+        try {
+          const url = new URL(href, window.location.origin);
+          const [handle, statusSegment, id] = url.pathname.split("/").filter(Boolean);
+          if (statusSegment !== "status" || !/^\d+$/.test(id || "")) return null;
+          return { href: url.toString(), handle, id };
+        } catch {
+          return null;
+        }
+      };
 
-        const statusId = statusLink.match(/\/status\/(\d+)/)?.[1];
+      for (const article of articles) {
+        const status = [...article.querySelectorAll('a[href*="/status/"]')]
+          .map((link) => parseStatusLink(link.href))
+          .filter(Boolean)
+          .find((candidate) => candidate.handle.toLowerCase() === targetUsernameLower);
+        if (!status) continue;
+
+        const statusId = status.id;
         if (!statusId || unique.has(statusId)) continue;
 
         const time = article.querySelector("time");
@@ -537,8 +553,8 @@ async function extractPosts(page, username, maxPosts) {
 
         unique.set(statusId, {
           id: statusId,
-          url: `https://x.com/${targetUsername}/status/${statusId}`,
-          authorHandle: `@${targetUsername}`,
+          url: `https://x.com/${status.handle}/status/${statusId}`,
+          authorHandle: `@${status.handle}`,
           publishedAt: time?.getAttribute("datetime") || null,
           relativeTime: time?.innerText?.trim() || time?.textContent?.trim() || null,
           text,
@@ -638,6 +654,10 @@ async function scrapeUser(context, username, options) {
       generatedAt: new Date().toISOString(),
       posts: posts.slice(0, maxPosts)
     };
+  } catch (error) {
+    const debugOnError = argValue("debugOnError", "true") !== "false";
+    await saveDebugSnapshot(page, username, "error", debugOnError).catch(() => {});
+    throw error;
   } finally {
     await page.close().catch(() => {});
   }
