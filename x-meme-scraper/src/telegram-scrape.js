@@ -148,7 +148,7 @@ async function main() {
   const apiHash = String(process.env.TELEGRAM_API_HASH || "").trim();
   const stringSession = String(process.env.TELEGRAM_STRING_SESSION || "").trim();
   const proxy = parseSocksProxy(process.env.TELEGRAM_PROXY_URL);
-  const maxMessages = Math.max(1, Math.min(200, Number(argValue("max", "50")) || 50));
+  const maxMessages = Math.max(1, Math.min(1000, Number(argValue("max", "50")) || 50));
   const query = String(argValue("query", "") ?? "").trim();
   const memeOnly = booleanArg("memeOnly", false);
   const memeMinScore = Math.max(1, Math.min(8, Number(argValue("memeMinScore", "2")) || 2));

@@ -14,6 +14,8 @@ loadLocalEnv();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..");
+const dataDir = path.join(projectRoot, "data");
+const sentContractsPath = path.join(dataDir, "telegram-contract-sent.json");
 
 const EXCLUDE_GROUPS = [
   "\u7fa4\u804a\u6d88\u606f",
@@ -29,6 +31,13 @@ const EXCLUDE_GROUPS = [
   "\u5931\u7720\u805a\u5408\u7fa4\u4ea4\u6d41",
   "\u4e8c\u5a03\u805a\u5408"
 ];
+
+function argValue(name, fallback) {
+  const index = process.argv.indexOf(`--${name}`);
+  if (index !== -1 && process.argv[index + 1]) return process.argv[index + 1];
+  const inline = process.argv.find((arg) => arg.startsWith(`--${name}=`));
+  return inline ? inline.slice(name.length + 3) : fallback;
+}
 
 function csvCell(value) {
   return `"${String(value ?? "").replaceAll('"', '""')}"`;
@@ -70,9 +79,75 @@ function formatContractCard(card) {
 }
 
 function formatContractCards(payload) {
-  const cards = buildContractCards(payload, 20);
-  if (!cards.length) return ["\u672c\u8f6e\u6ca1\u6709\u53d1\u73b0\u91cd\u590d CA\u3002"];
+  const cards = buildContractCards(payload);
+  if (!cards.length) return ["\u672c\u8f6e\u6ca1\u6709\u53d1\u73b0 CA\u3002"];
   return cards.map(formatContractCard);
+}
+
+function notifyTarget() {
+  return String(process.env.TELEGRAM_NOTIFY_TARGET || "").trim();
+}
+
+function contractKey(address) {
+  const value = String(address || "").trim();
+  return value.startsWith("0x") ? value.toLowerCase() : value;
+}
+
+function extractCardAddress(text) {
+  return String(text || "").match(/^CA:\s*(\S+)/m)?.[1] || "";
+}
+
+function sendWindowMs() {
+  const minutes = Number(argValue("sendWindowMinutes", process.env.TELEGRAM_SEND_WINDOW_MINUTES || "20"));
+  const safeMinutes = Number.isFinite(minutes) ? Math.max(1, Math.min(120, minutes)) : 20;
+  return safeMinutes * 60 * 1000;
+}
+
+function sendCardLimit() {
+  const limit = Number(argValue("sendLimit", process.env.TELEGRAM_SEND_CARD_LIMIT || "400"));
+  return Number.isFinite(limit) ? Math.max(1, Math.min(1000, Math.trunc(limit))) : 400;
+}
+
+function sendDelayMs(pendingCount) {
+  if (pendingCount <= 0) return 0;
+  return Math.max(2000, Math.ceil(sendWindowMs() / pendingCount));
+}
+
+async function readSentContracts() {
+  try {
+    return JSON.parse(await fs.readFile(sentContractsPath, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+async function writeSentContracts(sentContracts) {
+  await fs.mkdir(dataDir, { recursive: true });
+  await fs.writeFile(sentContractsPath, `${JSON.stringify(sentContracts, null, 2)}\n`, "utf8");
+}
+
+async function seedSentContractsFromTelegram(client, sentContracts) {
+  const target = notifyTarget();
+  if (!target) return sentContracts;
+  try {
+    const entity = await client.getEntity(target);
+    const messages = await client.getMessages(entity, { limit: 1000 });
+    for (const message of messages) {
+      const address = extractCardAddress(message.message || "");
+      if (!address) continue;
+      const key = contractKey(address);
+      if (!sentContracts[key]) {
+        sentContracts[key] = {
+          address,
+          sentAt: message.date ? new Date(message.date * 1000).toISOString() : new Date().toISOString(),
+          source: "telegram-history"
+        };
+      }
+    }
+  } catch (error) {
+    console.log(`Could not seed sent CA history from Telegram: ${error.message}`);
+  }
+  return sentContracts;
 }
 
 function runScrape() {
@@ -87,12 +162,13 @@ function runScrape() {
     "--memeOnly",
     "false",
     "--max",
-    "100"
+    "500"
   ];
 
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, {
       cwd: projectRoot,
+      env: { ...process.env, TELEGRAM_NOTIFY_ENABLED: "false" },
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -178,21 +254,60 @@ async function notify(text) {
   }
 }
 
-async function notifyMany(messages) {
+async function notifyMany(cards) {
   const apiId = Number(process.env.TELEGRAM_API_ID || 0);
   const apiHash = String(process.env.TELEGRAM_API_HASH || "").trim();
   const stringSession = String(process.env.TELEGRAM_STRING_SESSION || "").trim();
   if (!apiId || !apiHash || !stringSession) throw new Error("Telegram session config is missing.");
+  const skipAlreadySent = argValue("skipAlreadySent", process.env.TELEGRAM_SKIP_ALREADY_SENT || "false") === "true";
+  const sentContracts = await readSentContracts();
   const client = new TelegramClient(new StringSession(stringSession), apiId, apiHash, {
     connectionRetries: 5,
     proxy: parseSocksProxy(process.env.TELEGRAM_PROXY_URL)
   });
   await client.connect();
   try {
-    for (const message of messages) {
-      await sendTelegramNotification(client, message);
-      await new Promise((resolve) => setTimeout(resolve, 500));
+    if (skipAlreadySent) await seedSentContractsFromTelegram(client, sentContracts);
+    let sentCount = 0;
+    let skippedCount = 0;
+    const pendingCards = [];
+    for (const card of cards) {
+      const key = contractKey(card.address);
+      if (skipAlreadySent && sentContracts[key]) {
+        skippedCount += 1;
+        continue;
+      }
+      pendingCards.push(card);
     }
+    const delayMs = sendDelayMs(pendingCards.length);
+    console.log(`Telegram notification pacing: ${pendingCards.length} cards over ${Math.round(sendWindowMs() / 60000)}m, delay ${Math.round(delayMs / 1000)}s, skipAlreadySent=${skipAlreadySent}.`);
+    for (const card of pendingCards) {
+      const key = contractKey(card.address);
+      const message = formatContractCard(card);
+      let sent = false;
+      while (!sent) {
+        try {
+          await sendTelegramNotification(client, message);
+          sent = true;
+          sentCount += 1;
+          sentContracts[key] = {
+            address: card.address,
+            sentAt: new Date().toISOString(),
+            rank: card.rank,
+            count: card.count
+          };
+          await writeSentContracts(sentContracts);
+        } catch (error) {
+          const waitSeconds = Number(String(error.message || "").match(/wait of (\d+) seconds/i)?.[1] || 0);
+          if (!waitSeconds) throw error;
+          const waitMs = (waitSeconds + 5) * 1000;
+          console.log(`Telegram flood wait ${waitSeconds}s; retrying after ${Math.round(waitMs / 1000)}s.`);
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
+        }
+      }
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    console.log(`Telegram notifications sent: ${sentCount}; skipped already sent: ${skippedCount}.`);
   } finally {
     await client.disconnect();
   }
@@ -203,7 +318,12 @@ async function main() {
   if (!result.jsonPath) throw new Error("Telegram scrape completed but no JSON output path was found.");
   const payload = JSON.parse(await fs.readFile(result.jsonPath, "utf8"));
   const duplicateCsv = await writeDuplicateCsv(payload, result.jsonPath);
-  await notifyMany(formatContractCards(payload));
+  const cards = buildContractCards(payload, sendCardLimit());
+  if (cards.length) {
+    await notifyMany(cards);
+  } else {
+    await notify("\u672c\u8f6e\u6ca1\u6709\u53d1\u73b0 CA\u3002");
+  }
   console.log(`Telegram contract cycle complete: ${result.jsonPath}`);
   console.log(`Duplicate CSV: ${duplicateCsv}`);
 }

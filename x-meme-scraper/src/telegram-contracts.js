@@ -115,11 +115,39 @@ export function inferNarrative(text, info = {}) {
   return lines.slice(0, 2).join(" ").slice(0, 220);
 }
 
-export function buildContractCards(payload, limit = 20) {
+function summarizeAllContracts(posts) {
+  const postsByAddress = new Map();
+  for (const post of posts) {
+    for (const address of post.contractAddresses || []) {
+      if (!postsByAddress.has(address)) postsByAddress.set(address, []);
+      postsByAddress.get(address).push(post);
+    }
+  }
+  return [...postsByAddress.entries()]
+    .map(([address, related]) => {
+      return {
+        address,
+        count: related.length,
+        groups: unique(related.map((post) => post.group)),
+        messageIds: unique(related.map((post) => String(post.id))),
+        info: mergeInfo(related),
+        relatedPosts: related
+      };
+    })
+    .sort((left, right) => right.count - left.count);
+}
+
+export function buildContractCards(payload, limit = Number.POSITIVE_INFINITY) {
   const posts = Array.isArray(payload?.posts) ? payload.posts : [];
-  const summaries = Array.isArray(payload?.contractSummary) ? payload.contractSummary : [];
-  return summaries.slice(0, limit).map((summary, index) => {
-    const related = posts.filter((post) => (post.contractAddresses || []).includes(summary.address));
+  const repeatedSummaries = Array.isArray(payload?.contractSummary) ? payload.contractSummary : [];
+  const repeatedByAddress = new Map(repeatedSummaries.map((summary) => [summary.address, summary]));
+  const summaries = summarizeAllContracts(posts).map((summary) => ({
+    ...summary,
+    ...(repeatedByAddress.get(summary.address) || {})
+  }));
+  const selected = Number.isFinite(limit) ? summaries.slice(0, limit) : summaries;
+  return selected.map((summary, index) => {
+    const related = summary.relatedPosts || posts.filter((post) => (post.contractAddresses || []).includes(summary.address));
     const richest = related
       .slice()
       .sort((left, right) => Object.keys(right.tokenInfo || {}).length - Object.keys(left.tokenInfo || {}).length)[0] || {};

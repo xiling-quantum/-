@@ -1,0 +1,48 @@
+{
+  "notifyTarget": {
+    "title": "\u7279\u6b8a\u7fa4",
+    "id": "3984522251"
+  },
+  "maxMessages": 500,
+  "sendLimit": 400,
+  "sendWindowMinutes": 20,
+  "contractOnly": true,
+  "groups": [
+    {
+      "name": "\u4e0d\u77e5\u7ed3\u679c\u662f\u8d4c\u535a \u9884\u77e5\u7ed3\u679c\u662f\u6295\u8d44",
+      "title": "\u4e0d\u77e5\u7ed3\u679c\u662f\u8d4c\u535a \u9884\u77e5\u7ed3\u679c\u662f\u6295\u8d44",
+      "id": "3754065132",
+      "selected": true
+    },
+    {
+      "name": "KK\u96c6\u56e2-\uff08\u9ad8\u9891\u7535\u68cd\u26a1\ufe0f\u6253\u65b0\u7248\uff09",
+      "username": "Kclub737226",
+      "id": "2003227078",
+      "selected": true
+    },
+    {
+      "name": "\u8ffd\u98ce\u6253\u72d7\u65e5\u8bb0",
+      "username": "zhuifei99999",
+      "id": "3731558024",
+      "selected": true
+    },
+    {
+      "name": "\u5c0f\u80d6\u4ea4\u6613\u4e2d\u5fc3(Dwen Marketing)",
+      "username": "Dwen_Exchange",
+      "id": "1705878419",
+      "selected": true
+    },
+    {
+      "name": "\u6e05\u83ef\u5927\u5b78",
+      "username": "chinghuadaxue",
+      "id": "3730578357",
+      "selected": true
+    },
+    {
+      "name": "XAce Calls - Multichain",
+      "username": "XAceCalls",
+      "id": "1955928748",
+      "selected": true
+    }
+  ]
+}
