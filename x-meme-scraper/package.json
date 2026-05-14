@@ -16,7 +16,8 @@
     "telegram:live": "node ./src/telegram-live.js",
     "telegram:contracts:update": "node ./src/telegram-contract-cycle.js",
     "telegram:special:update": "node ./src/telegram-special-cycle.js",
-    "check": "node --check ./src/server.js && node --check ./src/browser-scrape.js && node --check ./src/import-x-cookies.js && node --check ./src/telegram-login.js && node --check ./src/telegram-scrape.js && node --check ./src/telegram-live.js && node --check ./src/telegram-notify.js && node --check ./src/telegram-contracts.js && node --check ./src/telegram-contract-cycle.js && node --check ./src/telegram-special-cycle.js"
+    "token:enrich": "node ./src/token-enrich.js",
+    "check": "node --check ./src/server.js && node --check ./src/browser-scrape.js && node --check ./src/import-x-cookies.js && node --check ./src/telegram-login.js && node --check ./src/telegram-scrape.js && node --check ./src/telegram-live.js && node --check ./src/telegram-notify.js && node --check ./src/telegram-send-lock.js && node --check ./src/telegram-contracts.js && node --check ./src/token-enrichment.js && node --check ./src/telegram-contract-cycle.js && node --check ./src/telegram-special-cycle.js && node --check ./src/token-enrich.js"
   },
   "dependencies": {
     "input": "^1.0.1",

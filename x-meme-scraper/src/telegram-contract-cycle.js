@@ -8,6 +8,13 @@ import { StringSession } from "telegram/sessions/index.js";
 import { loadLocalEnv, parseSocksProxy } from "./local-env.js";
 import { sendTelegramNotification } from "./telegram-notify.js";
 import { buildContractCards } from "./telegram-contracts.js";
+import {
+  configuredDexProxy,
+  configuredDexRequestsPerMinute,
+  dexRequestDelayMs,
+  enrichContractCards
+} from "./token-enrichment.js";
+import { acquireTelegramSendLock } from "./telegram-send-lock.js";
 
 loadLocalEnv();
 
@@ -49,6 +56,21 @@ function mark(value) {
   return "UNKNOWN";
 }
 
+function formatTime(value) {
+  const timestamp = Date.parse(value || "");
+  if (!Number.isFinite(timestamp)) return "";
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).format(new Date(timestamp)).replaceAll("/", "-");
+}
+
 function formatContractCard(card) {
   const lines = [];
   const titleParts = [];
@@ -59,22 +81,32 @@ function formatContractCard(card) {
   lines.push(`CA: ${card.address}`);
   lines.push("");
   lines.push("\u4ea4\u6613\u4fe1\u606f:");
-  if (card.age) lines.push(`- \u5f00\u76d8\u65f6\u95f4: ${card.age}`);
+  lines.push(`- \u94fe\u4e0a\u5f00\u76d8\u65f6\u95f4: ${formatTime(card.pairCreatedAt) || "UNKNOWN"}${card.dexFound ? " (DexScreener)" : ""}`);
+  if (card.dexId) lines.push(`- DEX: ${card.dexId}`);
   if (card.marketCap) lines.push(`- \u5e02\u503c: ${card.marketCap}`);
   if (card.liquidity) lines.push(`- \u6d41\u52a8\u6027: ${card.liquidity}`);
   if (card.holders) lines.push(`- \u6301\u6709\u4eba: ${card.holders}`);
   if (card.volume24h) lines.push(`- 24h \u4ea4\u6613\u91cf: ${card.volume24h}`);
   if (card.change24h) lines.push(`- 24h: ${card.change24h}`);
   lines.push(`- \u94fe\u63a5: gmgn ${mark(card.hasGmgn)} | dex ${mark(card.hasDexscreener)} | \u5b98\u7f51 ${mark(card.hasWebsite)} | \u63a8\u7279 ${mark(card.hasTwitter)}`);
-  if (card.narrative) {
+  if (card.dexError) lines.push(`- API: ${card.dexError}`);
+  if (card.onChainNarrative) {
     lines.push("");
-    lines.push("\u53d9\u4e8b:");
+    lines.push("\u94fe\u4e0a\u753b\u50cf(API):");
+    lines.push(card.onChainNarrative);
+  }
+  if (card.signalNarrative) {
+    lines.push("");
+    lines.push("\u4fe1\u53f7\u6765\u6e90/\u539f\u5e16\u6545\u4e8b:");
+    lines.push(card.signalNarrative);
+  }
+  if (card.narrative && !String(card.signalNarrative || "").includes(String(card.narrative).slice(0, 40))) {
+    lines.push("");
+    lines.push("\u7fa4\u5185\u53d9\u4e8b:");
     lines.push(card.narrative);
   }
   lines.push("");
   lines.push(`\u672c\u8f6e\u63d0\u53ca\u6b21\u6570: ${card.count}`);
-  lines.push(`\u6765\u6e90\u7fa4: ${(card.groups || []).join(" / ")}`);
-  if (card.url) lines.push(`\u6765\u6e90\u94fe\u63a5: ${card.url}`);
   return lines.join("\n");
 }
 
@@ -104,13 +136,24 @@ function sendWindowMs() {
 }
 
 function sendCardLimit() {
-  const limit = Number(argValue("sendLimit", process.env.TELEGRAM_SEND_CARD_LIMIT || "400"));
-  return Number.isFinite(limit) ? Math.max(1, Math.min(1000, Math.trunc(limit))) : 400;
+  const limit = Number(argValue("sendLimit", process.env.TELEGRAM_SEND_CARD_LIMIT || "80"));
+  return Number.isFinite(limit) ? Math.max(1, Math.min(1000, Math.trunc(limit))) : 80;
+}
+
+function sendPerMinute() {
+  const limit = Number(argValue("sendPerMinute", process.env.TELEGRAM_SEND_PER_MINUTE || "4"));
+  return Number.isFinite(limit) ? Math.max(1, Math.min(240, Math.trunc(limit))) : 4;
+}
+
+function dexRequestsPerMinute() {
+  return configuredDexRequestsPerMinute(argValue("dexRpm", process.env.DEXSCREENER_REQUESTS_PER_MINUTE || ""));
 }
 
 function sendDelayMs(pendingCount) {
   if (pendingCount <= 0) return 0;
-  return Math.max(2000, Math.ceil(sendWindowMs() / pendingCount));
+  const windowDelay = Math.ceil(sendWindowMs() / pendingCount);
+  const rateLimitDelay = Math.ceil(60000 / sendPerMinute());
+  return Math.max(2000, windowDelay, rateLimitDelay);
 }
 
 async function readSentContracts() {
@@ -280,32 +323,38 @@ async function notifyMany(cards) {
       pendingCards.push(card);
     }
     const delayMs = sendDelayMs(pendingCards.length);
-    console.log(`Telegram notification pacing: ${pendingCards.length} cards over ${Math.round(sendWindowMs() / 60000)}m, delay ${Math.round(delayMs / 1000)}s, skipAlreadySent=${skipAlreadySent}.`);
-    for (const card of pendingCards) {
-      const key = contractKey(card.address);
-      const message = formatContractCard(card);
-      let sent = false;
-      while (!sent) {
-        try {
-          await sendTelegramNotification(client, message);
-          sent = true;
-          sentCount += 1;
-          sentContracts[key] = {
-            address: card.address,
-            sentAt: new Date().toISOString(),
-            rank: card.rank,
-            count: card.count
-          };
-          await writeSentContracts(sentContracts);
-        } catch (error) {
-          const waitSeconds = Number(String(error.message || "").match(/wait of (\d+) seconds/i)?.[1] || 0);
-          if (!waitSeconds) throw error;
-          const waitMs = (waitSeconds + 5) * 1000;
-          console.log(`Telegram flood wait ${waitSeconds}s; retrying after ${Math.round(waitMs / 1000)}s.`);
-          await new Promise((resolve) => setTimeout(resolve, waitMs));
+    console.log(`Telegram notification pacing: ${pendingCards.length} cards over ${Math.round(sendWindowMs() / 60000)}m, max ${sendPerMinute()}/min, delay ${Math.round(delayMs / 1000)}s, skipAlreadySent=${skipAlreadySent}.`);
+    const releaseSendLock = await acquireTelegramSendLock("telegram-contract-cycle");
+    try {
+      for (let index = 0; index < pendingCards.length; index += 1) {
+        const card = pendingCards[index];
+        const key = contractKey(card.address);
+        const message = formatContractCard(card);
+        let sent = false;
+        while (!sent) {
+          try {
+            await sendTelegramNotification(client, message);
+            sent = true;
+            sentCount += 1;
+            sentContracts[key] = {
+              address: card.address,
+              sentAt: new Date().toISOString(),
+              rank: card.rank,
+              count: card.count
+            };
+            await writeSentContracts(sentContracts);
+          } catch (error) {
+            const waitSeconds = Number(String(error.message || "").match(/wait of (\d+) seconds/i)?.[1] || 0);
+            if (!waitSeconds) throw error;
+            const waitMs = (waitSeconds + 5) * 1000;
+            console.log(`Telegram flood wait ${waitSeconds}s; retrying after ${Math.round(waitMs / 1000)}s.`);
+            await new Promise((resolve) => setTimeout(resolve, waitMs));
+          }
         }
+        if (index < pendingCards.length - 1 && delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
-      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    } finally {
+      await releaseSendLock();
     }
     console.log(`Telegram notifications sent: ${sentCount}; skipped already sent: ${skippedCount}.`);
   } finally {
@@ -318,7 +367,14 @@ async function main() {
   if (!result.jsonPath) throw new Error("Telegram scrape completed but no JSON output path was found.");
   const payload = JSON.parse(await fs.readFile(result.jsonPath, "utf8"));
   const duplicateCsv = await writeDuplicateCsv(payload, result.jsonPath);
-  const cards = buildContractCards(payload, sendCardLimit());
+  const baseCards = buildContractCards(payload, sendCardLimit());
+  const rpm = dexRequestsPerMinute();
+  const { cards, rateLimit } = await enrichContractCards(baseCards, {
+    requestsPerMinute: rpm,
+    delayMs: dexRequestDelayMs(rpm),
+    proxy: configuredDexProxy(argValue("dexProxy", ""))
+  });
+  console.log(`DexScreener enrichment: ${cards.filter((card) => card.dexFound).length}/${cards.length}; ${rateLimit.configuredRequestsPerMinute}/min.`);
   if (cards.length) {
     await notifyMany(cards);
   } else {

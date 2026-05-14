@@ -36,6 +36,7 @@ function firstMatch(text, patterns) {
 
 function extractTicker(text) {
   return firstMatch(text, [
+    /(?:💵|💰|Token|Coin)\s*\$?([A-Za-z][A-Za-z0-9_]{1,31})\b/,
     /\$([A-Z][A-Z0-9_]{1,15})\b/,
     /^\s*\$?([A-Z][A-Z0-9_]{1,15})\s*[-—]\s*(?:BSC|ETH|BASE|SOL|SOLANA)\b/im,
     /\(([A-Z][A-Z0-9_]{1,15})\)/,
@@ -46,6 +47,7 @@ function extractTicker(text) {
 
 function extractTokenName(text) {
   return firstMatch(text, [
+    /(?:💵|💰)\s*([^\n\r|]{2,80})/,
     /(?:Name|Token|Coin)[:：\s]+([^\n\r|]{2,80})/i,
     /【[^】]+】\s*([^\n\r()]{2,60})\s*\([A-Z][A-Z0-9_]{1,15}\)/,
     /銆[^銆]+銆([^()\n\r]{2,60})\s*\([A-Z][A-Z0-9_]{1,15}\)/
@@ -60,6 +62,7 @@ export function extractTokenInfo(text) {
     chain: firstMatch(value, [
       /^\s*\$?[A-Z][A-Z0-9_]{1,15}\s*[-—]\s*(BSC|ETH|BASE|SOL|SOLANA)\b/im,
       /\bChain[:：\s]+(BSC|ETH|BASE|SOL|SOLANA|BNB|ARBITRUM|AVAX|TRON)\b/i,
+      /\|\s*[^\w\n\r|]{0,8}\s*(BSC|ETH|BASE|SOLANA|SOL|BNB|ARBITRUM|AVAX|TRON)\b/i,
       /\b(BSC|ETH|BASE|SOLANA|SOL)\s+(?:Pancake|Uniswap|Raydium|Pump)/i
     ]),
     age: firstMatch(value, [
@@ -137,6 +140,29 @@ function summarizeAllContracts(posts) {
     .sort((left, right) => right.count - left.count);
 }
 
+function validTime(value) {
+  const timestamp = Date.parse(value || "");
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function senderLabel(post) {
+  if (post?.senderUsername) return `@${post.senderUsername}`;
+  if (post?.senderName) return post.senderName;
+  if (post?.senderId) return String(post.senderId);
+  return "";
+}
+
+function compactStory(text) {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length >= 6)
+    .filter((line) => !extractContractAddresses(line).length)
+    .filter((line) => !/^https?:\/\//i.test(line))
+    .filter((line) => !/^(CA|MC|MCap|Market|Liquidity|Holders?|Vol|DEX|Chain)[:：\s]/i.test(line));
+  return lines.slice(0, 3).join(" ").replace(/\s+/g, " ").trim().slice(0, 320);
+}
+
 export function buildContractCards(payload, limit = Number.POSITIVE_INFINITY) {
   const posts = Array.isArray(payload?.posts) ? payload.posts : [];
   const repeatedSummaries = Array.isArray(payload?.contractSummary) ? payload.contractSummary : [];
@@ -148,15 +174,34 @@ export function buildContractCards(payload, limit = Number.POSITIVE_INFINITY) {
   const selected = Number.isFinite(limit) ? summaries.slice(0, limit) : summaries;
   return selected.map((summary, index) => {
     const related = summary.relatedPosts || posts.filter((post) => (post.contractAddresses || []).includes(summary.address));
+    const timestamps = related
+      .map((post) => validTime(post.publishedAt || post.scrapedAt))
+      .filter((timestamp) => timestamp !== null)
+      .sort((left, right) => left - right);
     const richest = related
       .slice()
       .sort((left, right) => Object.keys(right.tokenInfo || {}).length - Object.keys(left.tokenInfo || {}).length)[0] || {};
-    const info = { ...(summary.info || {}), ...(richest.tokenInfo || {}) };
+    const inferredInfo = extractTokenInfo(richest.text || related[0]?.text || "");
+    const info = { ...(summary.info || {}), ...(richest.tokenInfo || {}), ...inferredInfo };
+    const sourceSenders = unique(related.map(senderLabel)).slice(0, 4);
+    const sourceStories = unique(
+      related
+        .map((post) => compactStory(post.text))
+        .filter(Boolean)
+    ).slice(0, 3);
+    const primarySender = senderLabel(richest);
     return {
       rank: index + 1,
       address: summary.address,
       count: summary.count,
       groups: summary.groups || [],
+      sourceSenders,
+      sourceStories,
+      primarySender,
+      primarySource: [richest.group || summary.groups?.[0] || "", primarySender].filter(Boolean).join(" / "),
+      firstMentionAt: timestamps.length ? new Date(timestamps[0]).toISOString() : "",
+      lastMentionAt: timestamps.length ? new Date(timestamps.at(-1)).toISOString() : "",
+      mentionTimestamps: timestamps.map((timestamp) => new Date(timestamp).toISOString()),
       ticker: info.ticker || "",
       name: info.name || "",
       chain: (info.chain || "").toUpperCase(),

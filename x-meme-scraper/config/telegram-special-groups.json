@@ -4,8 +4,13 @@
     "id": "3984522251"
   },
   "maxMessages": 500,
-  "sendLimit": 400,
+  "sendLimit": 80,
   "sendWindowMinutes": 20,
+  "sendPerMinute": 4,
+  "skipAlreadySent": false,
+  "dexRequestsPerMinute": 240,
+  "dexTimeoutSeconds": 8,
+  "dexConcurrency": 4,
   "contractOnly": true,
   "groups": [
     {
