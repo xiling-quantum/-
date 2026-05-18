@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
@@ -9,6 +10,8 @@ const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..");
+const dataDir = path.join(projectRoot, "data");
+const narrativeLibraryPath = path.join(dataDir, "token-narrative-library.ndjson");
 
 export const DEXSCREENER_SEARCH_LIMIT_PER_MINUTE = 300;
 export const DEFAULT_DEXSCREENER_REQUESTS_PER_MINUTE = 240;
@@ -45,6 +48,7 @@ const DEFAULT_METADATA_SOURCES = [
 ];
 const metadataPayloadCache = new Map();
 const metadataTextCache = new Map();
+const translationTextCache = new Map();
 
 function boundedNumber(value, fallback, min, max) {
   const number = Number(value);
@@ -229,6 +233,62 @@ function bestMetadataDescription(entries = []) {
   return String(bestMetadataEntry(entries)?.description || "").trim();
 }
 
+function isGenericChainMetadataDescription(value) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return /^链上浏览器(?:标识为|仅返回)|^Solscan 标识为|^Solscan 返回|^Jupiter 标识为/i.test(text);
+}
+
+function isLowSignalProjectDescription(value) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return true;
+  const lower = text.toLowerCase();
+  return (
+    /^(?:socials?|website|twitter|telegram)\s*:/i.test(text) ||
+    /^deployed using(?:\s+socials?:.*)?$/i.test(text) ||
+    /^(?:socials?:\s*)?(?:twitter|telegram|website)\s*:?\s*(?:\/\s*)?(?:twitter|telegram|website)?\s*:?$/i.test(text) ||
+    /\bGMGN\.AI\b.*\bFastest Multi-Chain Meme Trading Terminal\b/i.test(text) ||
+    /\bTrade at lightning speed across\b.*\bGMGN\b/i.test(text) ||
+    lower === "deployed using"
+  );
+}
+
+function projectDescriptionFromEntry(entry) {
+  const description = cleanNarrativeText(entry?.description || "", 320);
+  if (
+    !description ||
+    isLowSignalMetadataText(description) ||
+    isGenericChainMetadataDescription(description) ||
+    isLowSignalProjectDescription(description)
+  ) return "";
+  return description;
+}
+
+function preferredProjectDescription(dex = {}, metadataSources = []) {
+  const dexDescription = cleanNarrativeText(dex.description || "", 320);
+  if (dexDescription && !isLowSignalMetadataText(dexDescription)) {
+    return { source: "dexscreener_pair", description: dexDescription };
+  }
+
+  const sourcePriority = [
+    /^dexscreener_/i,
+    /^pumpfun$/i,
+    /^geckoterminal$/i,
+    /^coingecko$/i,
+    /^coinmarketcap$/i,
+    /^jupiter_token$/i,
+    /_page$/i,
+    /^ca_search$/i
+  ];
+  for (const pattern of sourcePriority) {
+    const entry = metadataSources.find((item) => pattern.test(String(item?.source || "")) && projectDescriptionFromEntry(item));
+    if (entry) return { source: entry.source, description: projectDescriptionFromEntry(entry) };
+  }
+
+  const bestEntry = bestMetadataEntry(metadataSources);
+  const description = projectDescriptionFromEntry(bestEntry);
+  return description ? { source: bestEntry.source, description } : { source: "", description: "" };
+}
+
 function tokenIdentityFromMetadata(entries = []) {
   const entry = bestMetadataEntry(entries);
   const title = String(entry?.title || "").trim();
@@ -263,7 +323,7 @@ function cleanNarrativeText(value, maxLength = 220) {
 }
 
 function tokenLabel(card, dex = {}) {
-  return dex.tokenName || card.name || card.ticker || dex.tokenSymbol || "";
+  return dex.tokenName || dex.tokenSymbol || card.name || card.ticker || "";
 }
 
 function looksLikeCallUpdate(value) {
@@ -279,35 +339,76 @@ function looksLikeCallUpdate(value) {
 function inferNarrativeTheme(text) {
   const value = String(text || "");
   const lower = value.toLowerCase();
+  const binanceSignal = value
+    .replace(/币安智能链|币安链|\bbinance\s+smart\s+chain\b|\bbnb\s+chain\b|\bbsc\b|\bwbnb\b|\bpancakeswap\b/gi, " ");
+
+  if (/币安人|binancian|永远是币安人|proud\s+to\s+always\s+be\s+a\s+binancian/i.test(binanceSignal)) {
+    return "项目来源是币安人/Binancian 身份梗，把交易所社区归属感包装成 Meme；热度方向主要看币安生态情绪、中文交易圈传播和低市值接力。";
+  }
+  if (/给币安的情书|love\s+letter\s+to\s+binance|情书.*币安/i.test(binanceSignal)) {
+    return "项目来源是给币安写情书的情绪梗，把交易所品牌好感和周一问候包装成 Meme；热度方向主要看 Binance 相关推文扩散、中文社区二创和链上成交承接。";
+  }
+  if (/binance\s+alpha|币安\s*alpha|上\s*alpha|alpha\s+listing/i.test(binanceSignal)) {
+    return "项目来源是 Binance Alpha/上所预期叙事，借平台关注度和潜在曝光制造交易情绪；热度方向主要看 Alpha 相关消息发酵、社群转发和盘口承接。";
+  }
+  if (/\bcz\b|赵长鹏|何一|he\s*yi|小二|双圣/i.test(binanceSignal)) {
+    return "项目来源是 CZ/何一等币安人物符号叙事，借交易所核心人物的社区认知降低传播门槛；热度方向主要看人物话题发酵、中文交易圈传播和资金接力。";
+  }
+  if (/币安梦|binance\s+dream/i.test(binanceSignal)) {
+    return "项目来源是 BNB 链财富梦/币安梦叙事，把链上暴富想象包装成 Meme；热度方向主要看中文社区共鸣、低市值波动和 BNB 生态情绪。";
+  }
+  if (/币安|binance/i.test(binanceSignal)) {
+    return "项目来源是 Binance 相关品牌/交易所注意力叙事，但不是币安人身份梗；热度方向主要看相关原帖是否继续扩散、中文交易圈传播和链上资金承接。";
+  }
+
+  if (/ai\s+girlfriend|人工智能女友|openclaw/i.test(value)) {
+    return "项目来源是 AI 伴侣/虚拟女友叙事，把人工智能陪伴概念包装成 Meme；热度方向主要看产品截图、社媒演示和链上交易能否形成连续关注。";
+  }
+  if (/\bai\b.*\bagent\b|\bagent\b|智能体|trading\s*bot|机器人|bot\b/i.test(value)) {
+    return "项目来源是 AI Agent/交易机器人热点，借加密市场高关注技术概念做包装；热度方向主要看产品证明、社媒扩散和链上成交承接。";
+  }
+  if (/\bai\b|人工智能|openhuman|ai\s+processor|abf|semiconductor|半导体|芯片/i.test(value)) {
+    return "项目来源是 AI/科技基础设施热点，借人工智能、芯片或材料供应链话题制造注意力；热度方向主要看外部新闻发酵、社媒传播和链上成交承接。";
+  }
+
   if (/特朗普|川普|trump|访华|中美|喜鹊|magpie/i.test(value)) {
     if (/喜鹊|magpie/i.test(value)) {
       return "项目来源是特朗普访华热点，把「喜鹊」吉祥鸟意象包装成动物/文化 Meme；热度方向主要看中美事件发酵、中文社区传播和低市值资金承接。";
     }
     return "项目来源是特朗普/中美政治事件热点，借公共事件注意力做短线 Meme；热度方向主要看新闻发酵、中文社群传播和链上成交承接。";
   }
-  if (/\bbuildmaxxing\b|gen\s*z/i.test(lower)) {
-    return "项目来源是 Gen Z / buildmaxxing 网络梗，属于自我提升黑话包装的 Meme；热度方向主要看社媒梗图扩散、群内喊单和低市值波动。";
-  }
-  if (/\b(?:troll|poop|shit|fart|toilet)\b|trollo|troll|poop/i.test(lower)) {
-    return "项目来源是 troll/poop 恶搞梗，属于低门槛 Meme/厕所幽默方向；热度方向更多来自群内喊单、极小市值波动和短线传播，缺少官网社媒时持续性偏弱。";
-  }
   if (/\bchina\b|中国|中美|国别/i.test(value)) {
     return "项目来源是 China/中国国别符号，属于宏观情绪和地域身份 Meme；热度方向主要看中文社区扩散、国别叙事情绪和短线资金是否继续接力。";
   }
-  if (/币安|binance|bnb|cz|何一|赵长鹏/i.test(value)) {
-    return "项目来源是币安身份/交易所信仰梗，把「币安人」这类社区归属感做成 Meme；热度方向主要看币安生态情绪、中文交易圈传播和低市值接力。";
+  if (/farm|farmer|agriculture|农场|农民|农业|bankrupt/i.test(value)) {
+    return "项目来源是农业/农场现实议题叙事，把农场破产、粮食生产或乡村议题转成 Meme；热度方向主要看社会议题讨论、社媒扩散和低市值资金承接。";
+  }
+  if (/\bwsb\b|wallstreetbets|reddit|degenerate|社区.*degenerate/i.test(value)) {
+    return "项目来源是 WSB/Reddit 投机社区文化，把散户梗和社区身份包装成 Meme；热度方向主要看论坛原帖传播、X 二创和链上成交承接。";
+  }
+  if (/\bcto\b|community\s+takeover|wojak|社区接管/i.test(value)) {
+    return "项目来源是 CTO/社区接管叙事，强调由社区重新组织传播和做市预期；热度方向主要看核心社区执行力、社媒更新频率和链上成交承接。";
+  }
+  if (/\bworld\s*cup\b|世界杯|betting|prediction|预测|博彩|下注/i.test(value)) {
+    return "项目来源是体育赛事/预测下注叙事，借世界杯或竞猜场景制造短线注意力；热度方向主要看赛事节点、社群参与度和链上交易活跃度。";
   }
   if (/tesla|特斯拉|musk|elon|rizo|hedgehog|刺猬|haba yes hedgehog/i.test(value)) {
-    return "项目来源是 Tesla/马斯克相关活动叙事叠加 Rizo/刺猬吉祥物动物梗；热度方向主要看特斯拉事件、吉祥物二创和动物 Meme 社区扩散。";
+    return "项目来源是 Tesla/马斯克相关活动叙事叠加吉祥物或动物梗；热度方向主要看特斯拉事件、相关推文二创和 Meme 社区扩散。";
+  }
+  if (/\bbuildmaxxing\b|gen\s*z/i.test(lower)) {
+    return "项目来源是 Gen Z / buildmaxxing 网络梗，属于自我提升黑话包装的 Meme；热度方向主要看社媒梗图扩散、群内喊单和低市值波动。";
+  }
+  if (/\b(?:troll|poop|shit|fart|toilet|buttcoin)\b|trollo|troll|poop/i.test(lower)) {
+    return "项目来源是恶搞/低门槛幽默梗，属于厕所幽默或反讽 Meme 方向；热度方向更多来自群内喊单、极小市值波动和短线传播，持续性取决于二创扩散。";
+  }
+  if (/\bnsfw\b|not\s+safe\s+for\s+work|成人|擦边/i.test(value)) {
+    return "项目来源是 NSFW/擦边互联网梗，借高刺激标题和社媒传播制造注意力；热度方向主要看原帖热度、二创扩散和短线资金承接。";
   }
   if (/\beth\b|ethereum|以太坊/i.test(value)) {
     return "项目来源是 ETH/以太坊主流符号的蹭名叙事，借大链认知降低理解门槛；热度方向主要看群内传播、链上交易承接和是否有真实项目方叙事补充。";
   }
-  if (/\b(?:doge|shib|inu|pepe|frog|cat|dog|goat)\b|狗|猫|蛙|佩佩/i.test(value)) {
-    return "项目来源是动物/IP 跟风 Meme，借现成符号认知降低传播成本；热度方向主要看梗图扩散、群内喊单和小市值资金接力。";
-  }
-  if (/\bai\b|agent|人工智能|智能体/i.test(value)) {
-    return "项目来源是 AI/Agent 热点，借当前加密市场高关注概念做包装；热度方向主要看产品证明、社媒扩散和链上成交承接。";
+  if (/\b(?:doge|shib|inu|pepe|frog|cat|dog|goat|wojak)\b|狗|猫|蛙|佩佩|表情包/i.test(value)) {
+    return "项目来源是动物/IP/表情包跟风 Meme，借现成符号认知降低传播成本；热度方向主要看梗图扩散、群内喊单和小市值资金接力。";
   }
   if (/\bnft\b|erc-721|erc-1155|非同质/i.test(lower)) {
     return "项目来源偏 NFT/合约标准叙事，但缺少发行计划、IP 内容或社区故事时信息面偏薄；热度方向主要看铸造/交易活跃度和社区承接。";
@@ -390,6 +491,20 @@ function buildNameBasedNarrative(card, dex = {}, story = "", description = "") {
   return `${source}，目前没有抓到项目方完整故事；热度方向主要看名称符号能否被社区二创、群内提及是否继续增加，以及${chainPart}成交和持有人是否跟上。`;
 }
 
+function buildProjectDescriptionNarrative(description) {
+  const text = cleanNarrativeText(description, 260);
+  if (!text) return "";
+  if (/^项目|^来源|^基于|^围绕/u.test(text)) return text;
+  return `项目来源是项目资料指向的「${text}」叙事；热度方向主要看该叙事能否在社媒/群内继续扩散，以及链上成交和持有人是否跟上。`;
+}
+
+function appendProjectDescriptionSupplement(theme, description) {
+  const text = cleanNarrativeText(description, 180);
+  if (!theme || !text) return theme;
+  if (theme.includes(text)) return theme;
+  return `${theme.replace(/[。.\s]+$/u, "")}；DexScreener/项目资料补充为「${text}」。`;
+}
+
 function buildVerificationHint(metadataEntry, card, dex = {}) {
   const source = String(metadataEntry?.source || "").toLowerCase();
   const hints = [];
@@ -415,8 +530,9 @@ function buildVerificationHint(metadataEntry, card, dex = {}) {
 
 export function buildBriefNarrative(card, dex = {}, metadataSources = []) {
   const metadataEntry = bestMetadataEntry(metadataSources);
+  const preferredDescription = preferredProjectDescription(dex, metadataSources);
   const metadataDescription = cleanNarrativeText(metadataEntry?.description || "", 320);
-  const description = cleanNarrativeText(metadataDescription || dex.description, 320);
+  const description = cleanNarrativeText(preferredDescription.description || metadataDescription, 320);
   const stories = Array.isArray(card.sourceStories) ? card.sourceStories : [];
   const rawStory = stories.find((item) => !looksLikeCallUpdate(item)) || (looksLikeCallUpdate(card.narrative) ? "" : card.narrative);
   const story = cleanNarrativeText(rawStory ? translateSignalStory(rawStory) : "", 260);
@@ -424,7 +540,11 @@ export function buildBriefNarrative(card, dex = {}, metadataSources = []) {
   const topic = description || story;
   const theme = inferNarrativeTheme([label, description, story, card.ticker, card.name].filter(Boolean).join(" "));
 
-  if (theme) return theme.slice(0, 360);
+  if (theme) return appendProjectDescriptionSupplement(theme, preferredDescription.description).slice(0, 360);
+
+  if (preferredDescription.description) {
+    return buildProjectDescriptionNarrative(preferredDescription.description).slice(0, 360);
+  }
 
   if (description) {
     if (/^链上浏览器标识为/u.test(description)) {
@@ -441,6 +561,16 @@ export function buildBriefNarrative(card, dex = {}, metadataSources = []) {
   }
 
   return buildDataOnlyNarrative(card, dex).slice(0, 360);
+}
+
+export function hasUsableNarrative(card) {
+  const text = String(card?.briefNarrative || card?.narrative || "").replace(/\s+/g, " ").trim();
+  if (!text) return false;
+  if (hasLongUntranslatedEnglish(text)) return false;
+  if (/暂无明确叙事|暂无项目方叙事|叙事主要来自名称|链上\/搜索也没有返回可用项目介绍|当前缺少项目方资料支撑/u.test(text)) {
+    return false;
+  }
+  return /项目来源是|项目基于|项目围绕|项目名称指向|项目名称围绕/u.test(text);
 }
 
 export function configuredDexRequestsPerMinute(value = "") {
@@ -474,6 +604,11 @@ function configuredMetadataSources(value = process.env.TOKEN_METADATA_SOURCES) {
 }
 
 function caSearchEnabled(value = process.env.TOKEN_CA_SEARCH_ENABLED) {
+  const raw = String(value ?? "true").trim().toLowerCase();
+  return !["0", "false", "no", "off"].includes(raw);
+}
+
+function translationEnabled(value = process.env.TOKEN_TRANSLATION_ENABLED) {
   const raw = String(value ?? "true").trim().toLowerCase();
   return !["0", "false", "no", "off"].includes(raw);
 }
@@ -566,6 +701,175 @@ async function cachedCurlText(url, options = {}) {
   const payload = await curlText(url, options);
   metadataTextCache.set(cacheKey, payload);
   return payload;
+}
+
+function hasEnglishPhrase(value) {
+  return /[A-Za-z]{3,}(?:[\s'’,-]+[A-Za-z]{2,})+/u.test(String(value || ""));
+}
+
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasLongUntranslatedEnglish(value) {
+  const text = String(value || "")
+    .replace(/\b(?:AI|API|CA|DEX|GMGN|BSC|ETH|SOL|BASE|OpenClaw|openclaw|Solana|Ethereum|Binance)\b/g, "")
+    .replace(/\$[A-Za-z0-9_]{1,20}\b/g, "");
+  return /[A-Za-z]{4,}(?:[\s'’,-]+[A-Za-z]{3,})+/u.test(text);
+}
+
+async function translateNarrativeToChinese(value, options = {}) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text || !translationEnabled(options.translationEnabled) || !hasEnglishPhrase(text)) return text;
+  if (translationTextCache.has(text)) return translationTextCache.get(text);
+
+  const quotedSegments = [...text.matchAll(/「([^」]+)」/gu)]
+    .map((match) => match[1])
+    .filter((item) => hasEnglishPhrase(item));
+  if (quotedSegments.length) {
+    let translated = text;
+    for (const segment of quotedSegments) {
+      const translatedSegment = await translatePlainEnglishToChinese(segment, options);
+      if (!translatedSegment) {
+        translated = translated
+          .replace(new RegExp(`；DexScreener/项目资料补充为「${escapeRegExp(segment)}」。?`, "u"), "")
+          .replace(new RegExp(`项目来源是项目资料指向的「${escapeRegExp(segment)}」叙事；?`, "u"), "");
+        continue;
+      }
+      translated = translated.replace(`「${segment}」`, `「${translatedSegment}」`);
+    }
+    if (!hasLongUntranslatedEnglish(translated)) {
+      translationTextCache.set(text, translated);
+      return translated;
+    }
+  }
+
+  const translatedText = await translatePlainEnglishToChinese(text, options);
+  translationTextCache.set(text, translatedText);
+  return translatedText;
+}
+
+async function translatePlainEnglishToChinese(value, options = {}) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text || !hasEnglishPhrase(text)) return text;
+  try {
+    const timeoutSeconds = boundedNumber(
+      options.translateTimeoutSeconds || process.env.TOKEN_TRANSLATE_TIMEOUT_SECONDS || 8,
+      8,
+      2,
+      20
+    );
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en%7Czh-CN`;
+    const payload = await cachedCurlJson(url, {
+      ...options,
+      timeoutSeconds,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+        ...(options.headers || {})
+      }
+    });
+    const translated = String(payload?.responseData?.translatedText || "").replace(/\s+/g, " ").trim();
+    if (translated && translated !== text && /[\u4e00-\u9fff]/u.test(translated)) return translated;
+  } catch {
+    // Try the Google endpoint below as a fallback.
+  }
+
+  try {
+    const timeoutSeconds = boundedNumber(
+      options.translateTimeoutSeconds || process.env.TOKEN_TRANSLATE_TIMEOUT_SECONDS || 8,
+      8,
+      2,
+      20
+    );
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=${encodeURIComponent(text)}`;
+    const payload = await cachedCurlJson(url, {
+      ...options,
+      timeoutSeconds,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+        ...(options.headers || {})
+      }
+    });
+    const translated = Array.isArray(payload?.[0])
+      ? payload[0].map((part) => part?.[0] || "").join("").replace(/\s+/g, " ").trim()
+      : "";
+    if (translated && translated !== text) {
+      return translated;
+    }
+  } catch {
+    // If translation fails, callers should drop English narrative instead of sending it.
+  }
+
+  return "";
+}
+
+async function localizedNarrative(value, options = {}) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  const translated = await translateNarrativeToChinese(text, options);
+  if (!translated && hasEnglishPhrase(text)) return "";
+  return translated || text;
+}
+
+function narrativeLibraryEnabled(value = process.env.TOKEN_NARRATIVE_LIBRARY_ENABLED) {
+  const raw = String(value ?? "true").trim().toLowerCase();
+  return !["0", "false", "no", "off"].includes(raw);
+}
+
+function compactLibraryText(value, maxLength = 500) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function narrativeLibrarySources(metadataSources = []) {
+  return metadataSources
+    .filter((entry) => entry?.description || entry?.title || entry?.url)
+    .map((entry) => ({
+      source: String(entry.source || "").trim(),
+      title: compactLibraryText(entry.title, 160),
+      description: compactLibraryText(entry.description, 700),
+      url: compactLibraryText(entry.url, 300)
+    }))
+    .slice(0, 20);
+}
+
+async function recordNarrativeLibrary(card, dex = {}, metadataSources = [], options = {}) {
+  if (!narrativeLibraryEnabled(options.narrativeLibraryEnabled)) return;
+  const address = String(card?.address || dex?.tokenAddress || dex?.address || "").trim();
+  if (!address) return;
+  const record = {
+    recordedAt: new Date().toISOString(),
+    address,
+    chain: card.chain || dex.chainId || "",
+    name: card.name || dex.tokenName || "",
+    ticker: card.ticker || dex.tokenSymbol || "",
+    source: card.source || card.groups?.[0] || "",
+    sender: card.primarySender || card.sourceSenders?.[0] || "",
+    count: card.count || 1,
+    pairCreatedAt: card.pairCreatedAt || dex.pairCreatedAt || "",
+    dex: {
+      found: Boolean(dex?.found),
+      pairUrl: dex.pairUrl || "",
+      dexId: dex.dexId || "",
+      description: compactLibraryText(dex.description, 700),
+      websites: Array.isArray(dex.websites) ? dex.websites.slice(0, 5) : [],
+      socials: Array.isArray(dex.socials) ? dex.socials.slice(0, 8) : []
+    },
+    sourceStories: (Array.isArray(card.sourceStories) ? card.sourceStories : [card.narrative])
+      .filter(Boolean)
+      .map((item) => compactLibraryText(item, 700))
+      .slice(0, 10),
+    metadataSources: narrativeLibrarySources(metadataSources),
+    signalNarrative: compactLibraryText(card.signalNarrative, 800),
+    briefNarrative: compactLibraryText(card.briefNarrative, 800),
+    narrative: compactLibraryText(card.narrative, 900),
+    usableNarrative: hasUsableNarrative(card)
+  };
+  try {
+    await fs.mkdir(dataDir, { recursive: true });
+    await fs.appendFile(narrativeLibraryPath, `${JSON.stringify(record)}\n`, "utf8");
+  } catch {
+    // Narrative library is best-effort and must not block sending.
+  }
 }
 
 async function postJson(url, payload, options = {}) {
@@ -1208,6 +1512,7 @@ function pageMetaEntry(source, url, html, tokenAddress) {
   if (!text || isLowSignalMetadataText(text)) return null;
   const address = String(tokenAddress || "").trim();
   const addressHint = address.length >= 10 && String(html || "").toLowerCase().includes(address.toLowerCase());
+  if (/^(?:gmgn|birdeye|dexscreener_search)_page$/i.test(source) && !addressHint) return null;
   const looksTokenPage = /token|price|market cap|liquidity|holders?|volume|gmgn|birdeye|dexscreener|buy|swap/i.test(text);
   if (!addressHint && !looksTokenPage) return null;
   return metadataSourceEntry(source, text, url, title);
@@ -1217,6 +1522,7 @@ async function queryKnownTokenPages(card, dex = {}, options = {}) {
   const chainId = dex.chainId || card.chain || "";
   const tokenAddress = dex.tokenAddress || card.address || "";
   const targets = knownTokenPageTargets(chainId, tokenAddress).slice(0, 3);
+  if (dex.pairUrl) targets.unshift(["dexscreener_pair_page", dex.pairUrl]);
   let entries = [];
   for (const [source, url] of targets) {
     try {
@@ -1265,7 +1571,7 @@ function parseDuckDuckGoResults(html, maxResults) {
 async function queryContractAddressSearch(card, dex = {}, options = {}) {
   if (!caSearchEnabled(options.caSearchEnabled)) return [];
   const maxResults = boundedNumber(process.env.TOKEN_CA_SEARCH_MAX_RESULTS || options.caSearchMaxResults || 3, 3, 1, 8);
-  const tokenTitle = [dex.tokenName || card.name || "", dex.tokenSymbol || card.ticker || ""].filter(Boolean).join(" ");
+  const tokenTitle = [dex.tokenName || dex.tokenSymbol || "", card.name || card.ticker || ""].filter(Boolean).join(" ");
   const query = [card.address, tokenTitle, dex.chainId || card.chain || "", "crypto token"].filter(Boolean).join(" ");
   try {
     const url = `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
@@ -1375,31 +1681,37 @@ export function buildSignalNarrative(card) {
 }
 
 export async function enrichContractCard(card, options = {}) {
-  const signalNarrative = buildSignalNarrative(card);
+  const signalNarrative = await localizedNarrative(buildSignalNarrative(card), options);
   try {
     const dex = await fetchDexScreener(card.address, options);
     if (!dex.found) {
       const metadataSources = await queryTokenMetadataSources(card, dex, fallbackMetadataOptions(options));
       const metadataDescription = bestMetadataDescription(metadataSources);
       const metadataIdentity = tokenIdentityFromMetadata(metadataSources);
-      return {
+      const briefNarrative = await localizedNarrative(buildBriefNarrative(card, dex, metadataSources), options);
+      const narrative = await localizedNarrative(mergeDexNarrative(card, dex, metadataSources), options);
+      const enriched = {
         ...card,
         dexFound: false,
         dexPairsFound: dex.pairsFound || 0,
-        ticker: card.ticker || metadataIdentity.ticker || "",
-        name: card.name || metadataIdentity.name || "",
+        ticker: metadataIdentity.ticker || card.ticker || "",
+        name: metadataIdentity.name || card.name || "",
         onChainTimeSource: "dexscreener",
         signalNarrative,
         metadataSources,
         metadataDescription,
         metadataSourceCount: metadataSources.length,
-        briefNarrative: buildBriefNarrative(card, dex, metadataSources),
-        narrative: mergeDexNarrative(card, dex, metadataSources)
+        briefNarrative,
+        narrative
       };
+      await recordNarrativeLibrary(enriched, dex, metadataSources, options);
+      return enriched;
     }
     const metadataSources = await queryTokenMetadataSources(card, dex, options);
     const metadataDescription = bestMetadataDescription(metadataSources);
-    return {
+    const briefNarrative = await localizedNarrative(buildBriefNarrative(card, dex, metadataSources), options);
+    const narrative = await localizedNarrative(mergeDexNarrative(card, dex, metadataSources), options);
+    const enriched = {
       ...card,
       dexFound: true,
       dexPairsFound: dex.pairsFound || 0,
@@ -1409,11 +1721,12 @@ export async function enrichContractCard(card, options = {}) {
       pairAddress: dex.pairAddress || "",
       pairCreatedAt: dex.pairCreatedAt || "",
       onChainTimeSource: "dexscreener:pairCreatedAt",
-      ticker: card.ticker || dex.tokenSymbol || "",
-      name: card.name || dex.tokenName || "",
+      ticker: dex.tokenSymbol || card.ticker || "",
+      name: dex.tokenName || card.name || "",
       marketCap: card.marketCap || String(dex.marketCap || ""),
       liquidity: card.liquidity || String(dex.liquidityUsd || ""),
       volume24h: card.volume24h || String(dex.volume24h || ""),
+      txns24h: card.txns24h || String(dex.txns24h || ""),
       change24h: card.change24h || String(dex.priceChange24h || ""),
       hasDexscreener: dex.pairUrl ? "yes" : card.hasDexscreener,
       hasWebsite: dex.websites?.length ? "yes" : card.hasWebsite,
@@ -1424,9 +1737,11 @@ export async function enrichContractCard(card, options = {}) {
       metadataSources,
       metadataDescription,
       metadataSourceCount: metadataSources.length,
-      briefNarrative: buildBriefNarrative(card, dex, metadataSources),
-      narrative: mergeDexNarrative(card, dex, metadataSources)
+      briefNarrative,
+      narrative
     };
+    await recordNarrativeLibrary(enriched, dex, metadataSources, options);
+    return enriched;
   } catch (error) {
     let metadataSources = [];
     try {
@@ -1436,20 +1751,24 @@ export async function enrichContractCard(card, options = {}) {
     }
     const metadataDescription = bestMetadataDescription(metadataSources);
     const metadataIdentity = tokenIdentityFromMetadata(metadataSources);
-    return {
+    const briefNarrative = await localizedNarrative(buildBriefNarrative(card, {}, metadataSources), options);
+    const narrative = await localizedNarrative(mergeDexNarrative(card, {}, metadataSources), options);
+    const enriched = {
       ...card,
       dexFound: false,
       dexError: error.message,
-      ticker: card.ticker || metadataIdentity.ticker || "",
-      name: card.name || metadataIdentity.name || "",
+      ticker: metadataIdentity.ticker || card.ticker || "",
+      name: metadataIdentity.name || card.name || "",
       onChainTimeSource: "dexscreener",
       signalNarrative,
       metadataSources,
       metadataDescription,
       metadataSourceCount: metadataSources.length,
-      briefNarrative: buildBriefNarrative(card, {}, metadataSources),
-      narrative: mergeDexNarrative(card, {}, metadataSources)
+      briefNarrative,
+      narrative
     };
+    await recordNarrativeLibrary(enriched, {}, metadataSources, options);
+    return enriched;
   }
 }
 

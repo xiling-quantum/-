@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
@@ -15,7 +16,8 @@ import {
   configuredDexProxy,
   configuredDexRequestsPerMinute,
   dexRequestDelayMs,
-  enrichContractCards
+  enrichContractCards,
+  hasUsableNarrative
 } from "./token-enrichment.js";
 import { acquireTelegramSendLock } from "./telegram-send-lock.js";
 
@@ -122,7 +124,8 @@ async function readConfig() {
     ...config,
     maxMessages: safeNumber(argValue("max", config.maxMessages || 500), 500, 1, 1000),
     sendLimit: safeNumber(argValue("sendLimit", config.sendLimit || 80), 80, 1, 1000),
-    sendWindowMinutes: safeNumber(argValue("sendWindowMinutes", config.sendWindowMinutes || 20), 20, 1, 120),
+    candidateLimit: safeNumber(argValue("candidateLimit", config.candidateLimit || 240), 240, 1, 1000),
+    sendWindowMinutes: safeNumber(argValue("sendWindowMinutes", config.sendWindowMinutes || 30), 30, 1, 120),
     sendPerMinute: safeNumber(
       argValue("sendPerMinute", config.sendPerMinute || process.env.TELEGRAM_SPECIAL_SEND_PER_MINUTE || process.env.TELEGRAM_SEND_PER_MINUTE || 4),
       4,
@@ -134,7 +137,8 @@ async function readConfig() {
     dexTimeoutSeconds: safeNumber(argValue("dexTimeoutSeconds", config.dexTimeoutSeconds || process.env.DEXSCREENER_TIMEOUT_SECONDS || 8), 8, 3, 30),
     dexConcurrency: safeNumber(argValue("dexConcurrency", config.dexConcurrency || process.env.DEXSCREENER_CONCURRENCY || 4), 4, 1, 8),
     mentionWindowHours: safeNumber(argValue("mentionWindowHours", config.mentionWindowHours || 48), 48, 1, 168),
-    skipAlreadySent: boolValue(argValue("skipAlreadySent", config.skipAlreadySent), false)
+    onChainAgeHours: safeNumber(argValue("onChainAgeHours", config.onChainAgeHours || 12), 12, 1, 168),
+    skipAlreadySent: boolValue(argValue("skipAlreadySent", config.skipAlreadySent), true)
   };
 }
 
@@ -220,6 +224,23 @@ function compactNumber(value) {
   return `$${number.toFixed(number >= 10 ? 0 : 2)}`;
 }
 
+function compactPlainNumber(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "UNKNOWN";
+  const number = Number(raw.replace(/[$,\s]/g, ""));
+  if (!Number.isFinite(number)) return raw;
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(number);
+}
+
+function formatPercent(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "UNKNOWN";
+  const number = Number(raw.replace(/[%+\s]/g, ""));
+  if (!Number.isFinite(number)) return raw;
+  const sign = number > 0 ? "+" : "";
+  return `${sign}${number.toFixed(Math.abs(number) >= 10 ? 1 : 2)}%`;
+}
+
 function formatAgeAgo(value) {
   const timestamp = Date.parse(value || "");
   if (!Number.isFinite(timestamp)) return "UNKNOWN";
@@ -237,8 +258,16 @@ function okMark(value) {
   return value === "yes" || value === true ? "✅" : "❌";
 }
 
+function cleanTokenTitlePart(value) {
+  return String(value || "").trim().replace(/^\$+/, "").trim();
+}
+
 function displayTokenTitle(card) {
-  const title = String(card.ticker || card.name || "").trim();
+  const name = cleanTokenTitlePart(card.name);
+  const ticker = cleanTokenTitlePart(card.ticker);
+  const title = name && ticker && normalize(name) !== normalize(ticker)
+    ? `${name} (${ticker})`
+    : name || ticker;
   if (!title) return "$UNKNOWN";
   return title.startsWith("$") ? title : `$${title}`;
 }
@@ -272,6 +301,15 @@ function narrativeDisplay(card) {
     .slice(0, 360) || "暂未抓到明确叙事，当前只依据群内提及和链上交易数据做候选监控，后续需要用项目方推文、官网或社群原文继续验证。";
 }
 
+function marketMetricsLine(card) {
+  return [
+    `流动性: ${compactNumber(card.liquidity)}`,
+    `24h量: ${compactNumber(card.volume24h)}`,
+    `24h交易: ${compactPlainNumber(card.txns24h)}笔`,
+    `24h涨跌: ${formatPercent(card.change24h)}`
+  ].join(" | ");
+}
+
 function formatSpecialCard(card, mentionWindowHours = 48) {
   const lines = [];
   lines.push(`${displayTokenTitle(card)} - ${displayChain(card)}`);
@@ -280,6 +318,7 @@ function formatSpecialCard(card, mentionWindowHours = 48) {
   lines.push("📈 交易信息");
   lines.push(`├开盘时间: ${formatAgeAgo(card.pairCreatedAt)}`);
   lines.push(`├市值: ${compactNumber(card.marketCap || card.fdv)}`);
+  lines.push(`├${marketMetricsLine(card)}`);
   lines.push(`└ 🔗 推特${okMark(card.hasTwitter)} 电报${okMark(card.hasTelegram)} 官网${okMark(card.hasWebsite)} gmgn`);
   lines.push("");
   lines.push(`📚 叙事: ${narrativeDisplay(card)}`);
@@ -292,9 +331,24 @@ function formatSpecialCard(card, mentionWindowHours = 48) {
 
 function sendDelayMs(count, minutes, perMinute) {
   if (count <= 0) return 0;
-  const windowDelay = Math.ceil((minutes * 60 * 1000) / count);
+  const windowDelay = count > 1 ? Math.ceil((minutes * 60 * 1000) / (count - 1)) : 0;
   const rateLimitDelay = Math.ceil(60000 / Math.max(1, perMinute));
   return Math.max(2000, windowDelay, rateLimitDelay);
+}
+
+function pairCreatedTimestamp(card) {
+  const timestamp = Date.parse(card?.pairCreatedAt || "");
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function withinOnChainAge(card, hours) {
+  const timestamp = pairCreatedTimestamp(card);
+  if (timestamp === null) return false;
+  return timestamp >= Date.now() - hours * 60 * 60 * 1000;
+}
+
+function oldestOnChainFirst(left, right) {
+  return (pairCreatedTimestamp(left) || 0) - (pairCreatedTimestamp(right) || 0);
 }
 
 async function sendMessageWithFloodWait(client, target, message) {
@@ -334,15 +388,66 @@ async function sentAddressesFromTelegram(client, target) {
   return sent;
 }
 
-async function notifySpecial(client, config, payload) {
-  const target = await resolveEntityFromDialogs(
-    client,
-    (entity) => matchesGroup(entity, config.notifyTarget || {}),
-    config.notifyTarget?.title || config.notifyTarget?.id || "special notify target"
-  );
-  const baseCards = buildContractCards(payload, config.sendLimit);
-  console.log(`Building special cards: ${baseCards.length}; enriching via DexScreener...`);
-  const { cards, rateLimit } = await enrichContractCards(baseCards, {
+function preparedOutputPath(source) {
+  const provided = argValue("preparedOutput", "");
+  if (provided) return path.resolve(projectRoot, provided);
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return path.join(dataDir, `telegram-prepared-${source}-${timestamp}.json`);
+}
+
+async function writePreparedOutput(prepared, source) {
+  const outputPath = preparedOutputPath(source);
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await fs.writeFile(outputPath, `${JSON.stringify(prepared, null, 2)}\n`, "utf8");
+  console.log(`Prepared JSON: ${outputPath}`);
+  return outputPath;
+}
+
+function preparedBatchPath(source, index) {
+  const provided = argValue("preparedOutput", "");
+  const suffix = `batch-${String(index).padStart(2, "0")}`;
+  if (provided) {
+    const resolved = path.resolve(projectRoot, provided);
+    return resolved.replace(/\.json$/i, `-${suffix}.json`);
+  }
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return path.join(dataDir, `telegram-prepared-${source}-${timestamp}-${suffix}.json`);
+}
+
+async function writePreparedBatch(prepared, source, index) {
+  const outputPath = preparedBatchPath(source, index);
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await fs.writeFile(outputPath, `${JSON.stringify(prepared, null, 2)}\n`, "utf8");
+  console.log(`Prepared batch JSON: ${outputPath}`);
+  return outputPath;
+}
+
+function launchPreparedSender(inputPath) {
+  console.log(`Launching prepared sender: ${inputPath}`);
+  const child = spawn(process.execPath, ["./src/telegram-prepared-sender.js", "--input", inputPath], {
+    cwd: projectRoot,
+    stdio: ["ignore", "inherit", "inherit"],
+    windowsHide: true,
+    detached: true
+  });
+  child.unref();
+}
+
+function mentionTimestamp(card) {
+  const timestamp = Date.parse(card?.lastMentionAt || card?.firstMentionAt || "");
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function selectSpecialBaseCards(payload) {
+  const allCards = buildContractCards(payload, Number.POSITIVE_INFINITY)
+    .sort((left, right) => mentionTimestamp(right) - mentionTimestamp(left));
+  console.log(`Special candidate selection: ${allCards.length}; all CAs, recent mention first, no repeat-count cap.`);
+  return allCards;
+}
+
+async function enrichSpecialCards(cards, config, label = "") {
+  console.log(`Building special cards${label ? ` ${label}` : ""}: ${cards.length}; enriching via DexScreener...`);
+  return enrichContractCards(cards, {
     requestsPerMinute: config.dexRequestsPerMinute,
     delayMs: dexRequestDelayMs(config.dexRequestsPerMinute),
     proxy: config.dexProxy,
@@ -354,9 +459,96 @@ async function notifySpecial(client, config, payload) {
       }
     }
   });
-  console.log(`DexScreener enrichment: ${cards.filter((card) => card.dexFound).length}/${cards.length}; ${rateLimit.configuredRequestsPerMinute}/min.`);
+}
+
+function filterSpecialCards(enrichedCards, config) {
+  return enrichedCards
+    .filter((card) => withinOnChainAge(card, config.onChainAgeHours))
+    .filter(hasUsableNarrative)
+    .sort(oldestOnChainFirst);
+}
+
+function buildSpecialPreparedFromCards(cards, config) {
+  return {
+    source: "telegram-special",
+    generatedAt: new Date().toISOString(),
+    sendWindowMinutes: config.sendWindowMinutes,
+    sendPerMinute: config.sendPerMinute,
+    items: cards.map((card) => ({
+      source: "telegram-special",
+      target: { mode: "dialog", ...(config.notifyTarget || {}) },
+      address: card.address,
+      pairCreatedAt: card.pairCreatedAt || "",
+      rank: card.rank,
+      count: mentionCountInWindow(card, config.mentionWindowHours),
+      history: "special",
+      message: formatSpecialCard(card, config.mentionWindowHours)
+    }))
+  };
+}
+
+async function streamSpecialBatches(config, payload) {
+  const baseCards = selectSpecialBaseCards(payload);
+  const batchSize = safeNumber(argValue("batchSize", process.env.TELEGRAM_SPECIAL_BATCH_SIZE || 80), 80, 20, 250);
+  const allEligible = [];
+  let foundTotal = 0;
+  let launched = 0;
+  for (let offset = 0, batch = 1; offset < baseCards.length; offset += batchSize, batch += 1) {
+    const chunk = baseCards.slice(offset, offset + batchSize);
+    const { cards: enrichedCards, rateLimit } = await enrichSpecialCards(chunk, config, `batch ${batch}`);
+    foundTotal += enrichedCards.filter((card) => card.dexFound).length;
+    const cards = filterSpecialCards(enrichedCards, config);
+    allEligible.push(...cards);
+    console.log(
+      `Special batch ${batch}: ${enrichedCards.filter((card) => card.dexFound).length}/${enrichedCards.length} found; ` +
+      `eligible ${cards.length}; ${rateLimit.configuredRequestsPerMinute}/min.`
+    );
+    if (cards.length) {
+      const preparedPath = await writePreparedBatch(buildSpecialPreparedFromCards(cards, config), "special", batch);
+      launchPreparedSender(preparedPath);
+      launched += 1;
+    }
+  }
+  console.log(
+    `Special streaming complete: ${foundTotal}/${baseCards.length} found; ` +
+    `eligible ${allEligible.length}; launched ${launched} sender batch(es).`
+  );
+  return { sent: 0, cards: allEligible.length, streamBatches: true, launched };
+}
+
+async function buildSpecialPrepared(config, payload) {
+  const baseCards = selectSpecialBaseCards(payload);
+  const { cards: enrichedCards, rateLimit } = await enrichSpecialCards(baseCards, config);
+  const cards = enrichedCards
+    .filter((card) => withinOnChainAge(card, config.onChainAgeHours))
+    .filter(hasUsableNarrative)
+    .sort(oldestOnChainFirst);
+  console.log(
+    `DexScreener enrichment: ${enrichedCards.filter((card) => card.dexFound).length}/${enrichedCards.length}; ` +
+    `${rateLimit.configuredRequestsPerMinute}/min. Eligible ${cards.length}: ` +
+    `on-chain <=${config.onChainAgeHours}h + usable narrative, sent oldest first so newest appears last.`
+  );
+  const prepared = buildSpecialPreparedFromCards(cards, config);
+  return { cards, prepared };
+}
+
+async function notifySpecial(client, config, payload) {
+  if (argValue("streamBatches", "false") === "true") {
+    return streamSpecialBatches(config, payload);
+  }
+  const { cards, prepared } = await buildSpecialPrepared(config, payload);
+  if (argValue("prepareOnly", "false") === "true") {
+    const preparedPath = await writePreparedOutput(prepared, "special");
+    return { sent: 0, cards: cards.length, preparedPath, prepareOnly: true };
+  }
+
+  const target = await resolveEntityFromDialogs(
+    client,
+    (entity) => matchesGroup(entity, config.notifyTarget || {}),
+    config.notifyTarget?.title || config.notifyTarget?.id || "special notify target"
+  );
   if (!cards.length) {
-    await sendMessageWithFloodWait(client, target, "\u672c\u8f6e\u7279\u6b8a\u7fa4\u6ca1\u6709\u53d1\u73b0 CA\u3002");
+    await sendMessageWithFloodWait(client, target, `本轮没有发现 ${config.onChainAgeHours} 小时内且有明确叙事的 CA。`);
     return { sent: 1, cards: 0 };
   }
   const sentBefore = config.skipAlreadySent ? await sentAddressesFromTelegram(client, target) : new Set();
@@ -442,12 +634,14 @@ async function main() {
       filters: {
         maxMessages: config.maxMessages,
         sendLimit: config.sendLimit,
+        candidateLimit: config.candidateLimit,
         sendWindowMinutes: config.sendWindowMinutes,
         sendPerMinute: config.sendPerMinute,
         dexRequestsPerMinute: config.dexRequestsPerMinute,
         dexTimeoutSeconds: config.dexTimeoutSeconds,
         dexConcurrency: config.dexConcurrency,
         mentionWindowHours: config.mentionWindowHours,
+        onChainAgeHours: config.onChainAgeHours,
         skipAlreadySent: config.skipAlreadySent,
         contractOnly: config.contractOnly !== false
       },

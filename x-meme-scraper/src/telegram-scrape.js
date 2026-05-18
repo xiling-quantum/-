@@ -83,9 +83,9 @@ function targetLabel(entity) {
   return normalizeTarget(entity?.username || entity?.title || entity?.firstName || entity?.id || "");
 }
 
-async function readDialogTargets(client, excludeGroups) {
+async function readDialogTargets(client, excludeGroups, limit) {
   const excluded = excludeGroups.map((item) => String(item || "").toLowerCase()).filter(Boolean);
-  const dialogs = await client.getDialogs({});
+  const dialogs = await client.getDialogs({ limit });
   return dialogs
     .map((dialog) => dialog.entity)
     .filter((entity) => entity && (entity.className === "Channel" || entity.className === "Chat"))
@@ -154,6 +154,7 @@ async function main() {
   const memeMinScore = Math.max(1, Math.min(8, Number(argValue("memeMinScore", "2")) || 2));
   const contractOnly = booleanArg("contractOnly", false);
   const allDialogs = booleanArg("allDialogs", false);
+  const dialogLimit = Math.max(20, Math.min(1000, Number(argValue("dialogLimit", "250")) || 250));
   const excludeGroups = listArg("excludeGroups").map(normalizeTarget);
   const senderFilters = listArg("senders").map(normalizeSenderFilter).filter(Boolean);
   const configuredTargets = await readTargets();
@@ -174,7 +175,7 @@ async function main() {
   await client.connect();
   const resolvedSenders = await resolveSenderFilters(client, senderFilters);
   const targetItems = allDialogs
-    ? await readDialogTargets(client, excludeGroups)
+    ? await readDialogTargets(client, excludeGroups, dialogLimit)
     : configuredTargets.map((target) => ({ target, entity: null, title: target }));
   const targets = targetItems.map((item) => item.target);
 
@@ -186,10 +187,17 @@ async function main() {
     const accounts = [];
     const errors = [];
     const posts = [];
+    console.log(
+      `Telegram scrape targets: ${targetItems.length}; allDialogs=${allDialogs}; ` +
+      `maxMessages=${maxMessages}; dialogLimit=${allDialogs ? dialogLimit : "configured"}.`
+    );
 
     for (const item of targetItems) {
       const target = item.target;
+      const index = accounts.length + errors.length + 1;
+      const title = item.title || target;
       try {
+        console.log(`Scanning Telegram group ${index}/${targetItems.length}: ${title}; max ${maxMessages}`);
         const entity = item.entity || await client.getEntity(target);
         const messages = await client.getMessages(entity, { limit: maxMessages });
         let matched = 0;
@@ -221,8 +229,10 @@ async function main() {
             scrapedAt: new Date().toISOString()
           });
         }
+        console.log(`Scanned Telegram group ${index}/${targetItems.length}: ${title}; messages ${messages.length}; CA posts ${matched}`);
         accounts.push({ target, scanned: messages.length, matched });
       } catch (error) {
+        console.log(`Telegram group scan failed ${index}/${targetItems.length}: ${title}; ${error.message}`);
         errors.push({ target, message: error.message });
       }
     }
@@ -235,7 +245,7 @@ async function main() {
     const payload = {
       source: "telegram",
       targets,
-      filters: { query, memeOnly, memeMinScore, maxMessages, senderFilters, senderIds: [...resolvedSenders.ids], unresolvedSenders: resolvedSenders.unresolved, contractOnly, allDialogs, excludeGroups },
+      filters: { query, memeOnly, memeMinScore, maxMessages, dialogLimit: allDialogs ? dialogLimit : null, senderFilters, senderIds: [...resolvedSenders.ids], unresolvedSenders: resolvedSenders.unresolved, contractOnly, allDialogs, excludeGroups },
       generatedAt: new Date().toISOString(),
       totalPosts: posts.length,
       contractSummary,

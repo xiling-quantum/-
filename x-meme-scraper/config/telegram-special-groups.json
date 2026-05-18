@@ -4,13 +4,18 @@
     "id": "3984522251"
   },
   "maxMessages": 500,
-  "sendLimit": 80,
-  "sendWindowMinutes": 20,
-  "sendPerMinute": 4,
-  "skipAlreadySent": false,
+  "sendLimit": 1000,
+  "candidateLimit": 1000,
+  "sendWindowMinutes": 30,
+  "sendPerMinute": 60,
+  "skipAlreadySent": true,
   "dexRequestsPerMinute": 240,
   "dexTimeoutSeconds": 8,
   "dexConcurrency": 4,
+  "onChainAgeHours": 24,
+  "cycleIntervalMinutes": 35,
+  "cycleIntervalJitterMinutes": 5,
+  "contractsStartDelayMinutes": 0,
   "contractOnly": true,
   "groups": [
     {
