@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -21,6 +21,8 @@ const DEXSCREENER_API_BASE = "https://api.dexscreener.com";
 const GECKOTERMINAL_API_BASE = "https://api.geckoterminal.com/api/v2";
 const COINGECKO_API_BASE = "https://api.coingecko.com/api/v3";
 const CMC_API_BASE = "https://pro-api.coinmarketcap.com/v2";
+const BITGET_WALLET_API_BASE = "https://bopenapi.bgwapi.io";
+const BITGET_WALLET_WEB_API_BASE = "https://api-web.bitkeep.fun";
 const JUPITER_API_BASE = "https://api.jup.ag";
 const JUPITER_PUBLIC_TOKEN_BASE = "https://tokens.jup.ag";
 const PUMPFUN_API_BASES = [
@@ -31,6 +33,7 @@ const SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com";
 const SOLANA_METADATA_PROGRAM_ID = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s";
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const DEFAULT_METADATA_SOURCES = [
+  "bitget_wallet_coininfo",
   "dexscreener_profile",
   "dexscreener_cto",
   "dexscreener_ads",
@@ -210,10 +213,15 @@ function metadataSignalScore(entry) {
   const description = String(entry?.description || "").trim();
   if (!description || isLowSignalMetadataText(description)) return -1;
   const source = String(entry?.source || "").toLowerCase();
+  if (source === "bitget_wallet_txinfo") return -1;
   const title = String(entry?.title || "").trim();
   let score = Math.min(description.length, 260);
+  if (source === "bitget_wallet_coininfo") score += 320;
+  else if (source === "bitget_wallet_page") score += 280;
+  else if (source === "bitget_wallet") score += 240;
   if (source.includes("chain_explorer") || /scan_token/i.test(source)) score += 180;
   if (source.includes("jupiter")) score += 150;
+  if (source.includes("bitget_wallet")) score += 140;
   if (source.includes("pumpfun") || source.includes("solana_metaplex")) score += 120;
   if (source === "ca_search") score += 60;
   if (title) score += 20;
@@ -264,14 +272,18 @@ function projectDescriptionFromEntry(entry) {
 }
 
 function preferredProjectDescription(dex = {}, metadataSources = []) {
+  const bitgetEntry = metadataSources.find((item) => /^bitget_wallet(?:_coininfo|_page)?$/i.test(String(item?.source || "")) && projectDescriptionFromEntry(item));
+  if (bitgetEntry) return { source: bitgetEntry.source, description: projectDescriptionFromEntry(bitgetEntry) };
+
   const dexDescription = cleanNarrativeText(dex.description || "", 320);
   if (dexDescription && !isLowSignalMetadataText(dexDescription)) {
     return { source: "dexscreener_pair", description: dexDescription };
   }
 
   const sourcePriority = [
-    /^dexscreener_/i,
+    /^bitget_wallet(?:_coininfo|_page)?$/i,
     /^pumpfun$/i,
+    /^dexscreener_/i,
     /^geckoterminal$/i,
     /^coingecko$/i,
     /^coinmarketcap$/i,
@@ -617,7 +629,7 @@ function fallbackMetadataOptions(options = {}) {
   if (options.metadataSources || process.env.TOKEN_METADATA_SOURCES) return options;
   return {
     ...options,
-    metadataSources: "pumpfun,geckoterminal,coingecko,coinmarketcap,jupiter,solana_metaplex,chain_explorer,ca_pages,ca_search"
+    metadataSources: "bitget_wallet_coininfo,pumpfun,geckoterminal,coingecko,coinmarketcap,jupiter,solana_metaplex,chain_explorer,ca_pages,ca_search"
   };
 }
 
@@ -679,28 +691,77 @@ async function curlText(url, options = {}) {
     if (value !== undefined && value !== null && value !== "") args.push("--header", `${key}: ${value}`);
   }
   args.push(url);
-  const { stdout } = await execFileAsync("curl.exe", args, {
+  try {
+    const { stdout } = await execFileAsync("curl.exe", args, {
+      cwd: projectRoot,
+      maxBuffer: 10 * 1024 * 1024,
+      windowsHide: true
+    });
+    return stdout;
+  } catch (error) {
+    if (proxy || process.platform !== "win32" || options.powershellFallback === false) throw error;
+    return powershellText(url, { ...options, timeoutSeconds }).catch(() => {
+      throw error;
+    });
+  }
+}
+
+async function powershellText(url, options = {}) {
+  const timeoutSeconds = boundedNumber(
+    options.timeoutSeconds || process.env.TOKEN_CA_SEARCH_TIMEOUT_SECONDS || DEFAULT_DEXSCREENER_TIMEOUT_SECONDS,
+    DEFAULT_DEXSCREENER_TIMEOUT_SECONDS,
+    3,
+    30
+  );
+  const payload = Buffer.from(JSON.stringify({
+    url,
+    headers: options.headers || {},
+    timeoutSeconds
+  }), "utf8").toString("base64");
+  const command = [
+    "$ProgressPreference = 'SilentlyContinue'",
+    "$OutputEncoding = [Text.Encoding]::UTF8",
+    "[Console]::OutputEncoding = [Text.Encoding]::UTF8",
+    `$payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${payload}')) | ConvertFrom-Json`,
+    "$headers = @{}",
+    "foreach ($p in $payload.headers.PSObject.Properties) { if ($null -ne $p.Value -and [string]$p.Value -ne '') { $headers[$p.Name] = [string]$p.Value } }",
+    "$response = Invoke-WebRequest -Uri ([string]$payload.url) -UseBasicParsing -MaximumRedirection 5 -TimeoutSec ([int]$payload.timeoutSeconds) -Headers $headers",
+    "[Console]::Write([string]$response.Content)"
+  ].join("; ");
+  const { stdout } = await execFileAsync("powershell.exe", [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    command
+  ], {
     cwd: projectRoot,
-    maxBuffer: 10 * 1024 * 1024,
+    maxBuffer: 15 * 1024 * 1024,
     windowsHide: true
   });
   return stdout;
 }
 
 async function cachedCurlJson(url, options = {}) {
-  const cacheKey = `${url}\n${JSON.stringify(options.headers || {})}`;
+  const cacheKey = `${String(options.method || "GET").toUpperCase()}\n${url}\n${JSON.stringify(options.headers || {})}\n${options.body === undefined ? "" : typeof options.body === "string" ? options.body : JSON.stringify(options.body)}`;
   if (metadataPayloadCache.has(cacheKey)) return metadataPayloadCache.get(cacheKey);
-  const payload = await curlJson(url, options);
-  metadataPayloadCache.set(cacheKey, payload);
-  return payload;
+  const request = curlJson(url, options).catch((error) => {
+    metadataPayloadCache.delete(cacheKey);
+    throw error;
+  });
+  metadataPayloadCache.set(cacheKey, request);
+  return request;
 }
 
 async function cachedCurlText(url, options = {}) {
   const cacheKey = `${url}\n${JSON.stringify(options.headers || {})}`;
   if (metadataTextCache.has(cacheKey)) return metadataTextCache.get(cacheKey);
-  const payload = await curlText(url, options);
-  metadataTextCache.set(cacheKey, payload);
-  return payload;
+  const request = curlText(url, options).catch((error) => {
+    metadataTextCache.delete(cacheKey);
+    throw error;
+  });
+  metadataTextCache.set(cacheKey, request);
+  return request;
 }
 
 function hasEnglishPhrase(value) {
@@ -953,14 +1014,15 @@ async function queryDexScreenerMetadataSources(chainId, tokenAddress, options = 
     ["dexscreener_boost", `${DEXSCREENER_API_BASE}/token-boosts/top/v1`],
     ["dexscreener_boost_latest", `${DEXSCREENER_API_BASE}/token-boosts/latest/v1`]
   ];
-  let entries = [];
-  for (const [source, url] of endpoints) {
-    try {
+  const settled = await Promise.allSettled(
+    endpoints.map(async ([source, url]) => {
       const payload = await cachedCurlJson(url, options);
-      entries = mergeMetadataEntries(entries, dexGlobalItemEntries(payload, chainId, tokenAddress, source));
-    } catch (error) {
-      entries = mergeMetadataEntries(entries, [metadataSourceEntry(`${source}_error`, error.message)]);
-    }
+      return dexGlobalItemEntries(payload, chainId, tokenAddress, source);
+    })
+  );
+  let entries = [];
+  for (const result of settled) {
+    if (result.status === "fulfilled") entries = mergeMetadataEntries(entries, result.value);
   }
   return entries.filter((entry) => !entry.source.endsWith("_error"));
 }
@@ -1161,6 +1223,375 @@ async function queryCoinMarketCapMetadata(tokenAddress, options = {}) {
       const homepage = Array.isArray(asset?.urls?.website) ? asset.urls.website.find(Boolean) || "" : "";
       return metadataSourceEntry("coinmarketcap", asset.description || "", homepage, asset.name || "");
     }));
+  } catch {
+    return [];
+  }
+}
+
+function bitgetWalletChainSlug(chainId) {
+  const key = String(chainId || "").trim().toLowerCase();
+  const slugs = {
+    ethereum: "eth",
+    ether: "eth",
+    eth: "eth",
+    bsc: "bnb",
+    bnb: "bnb",
+    "binance-smart-chain": "bnb",
+    base: "base",
+    solana: "sol",
+    sol: "sol",
+    polygon: "matic",
+    matic: "matic",
+    polygon_pos: "matic",
+    arbitrum: "arbitrum",
+    "arbitrum-one": "arbitrum",
+    avalanche: "avax_c",
+    avax: "avax_c",
+    avax_c: "avax_c",
+    tron: "trx",
+    trx: "trx",
+    optimism: "optimism",
+    op: "optimism",
+    opbnb: "opbnb",
+    fantom: "ftm",
+    ftm: "ftm",
+    blast: "blast",
+    linea: "linea",
+    mantle: "mnt",
+    mnt: "mnt",
+    sei: "seiv2",
+    seiv2: "seiv2",
+    hyper_evm: "hyper_evm",
+    hyperevm: "hyper_evm"
+  };
+  return slugs[key] || "";
+}
+
+function bitgetWalletCredentials() {
+  const apiKey = String(
+    process.env.BITGET_WALLET_API_KEY ||
+    process.env.BITGET_WEB3_API_KEY ||
+    process.env.BGW_API_KEY ||
+    ""
+  ).trim();
+  const apiSecret = String(
+    process.env.BITGET_WALLET_API_SECRET ||
+    process.env.BITGET_WEB3_API_SECRET ||
+    process.env.BGW_API_SECRET ||
+    ""
+  ).trim();
+  return { apiKey, apiSecret };
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function bitgetWalletRequest(apiPath, body) {
+  const { apiKey, apiSecret } = bitgetWalletCredentials();
+  if (!apiKey || !apiSecret) return null;
+  const bodyText = JSON.stringify(body || {});
+  const timestamp = String(Date.now());
+  const content = {
+    apiPath,
+    body: bodyText,
+    "x-api-key": apiKey,
+    "x-api-timestamp": timestamp
+  };
+  const signature = createHmac("sha256", apiSecret)
+    .update(stableJson(content))
+    .digest("base64");
+  return {
+    bodyText,
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "x-api-timestamp": timestamp,
+      "x-api-signature": signature
+    }
+  };
+}
+
+function bitgetWalletItems(payload) {
+  const data = payload?.data;
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.list)) return data.list;
+  if (Array.isArray(data?.coinList)) return data.coinList;
+  if (data && typeof data === "object") return [data];
+  return [];
+}
+
+function firstString(...values) {
+  return values.map((value) => String(value || "").trim()).find(Boolean) || "";
+}
+
+function bitgetWalletEntry(item) {
+  const name = firstString(item?.name, item?.tokenName, item?.coinName, item?.baseToken?.name);
+  const symbol = firstString(item?.symbol, item?.tokenSymbol, item?.coinSymbol, item?.baseToken?.symbol);
+  const about = firstString(item?.about, item?.ai_summary, item?.aiSummary, item?.information, item?.description, item?.desc, item?.introduction);
+  const categories = [
+    ...(Array.isArray(item?.tags) ? item.tags : []),
+    ...(Array.isArray(item?.categories) ? item.categories : []),
+    firstString(item?.category, item?.label)
+  ].filter(Boolean).slice(0, 6);
+  const description = [
+    about,
+    categories.length ? `Categories: ${categories.join(", ")}` : ""
+  ].filter(Boolean).join("\n");
+  const homepage = firstString(
+    item?.website,
+    item?.webSite,
+    item?.officialWebsite,
+    item?.homeUrl,
+    item?.homepage,
+    item?.url
+  );
+  return metadataSourceEntry("bitget_wallet", description, homepage, [name, symbol ? `$${symbol}` : ""].filter(Boolean).join(" "));
+}
+
+async function queryBitgetWalletMetadata(chainId, tokenAddress, options = {}) {
+  const chain = bitgetWalletChainSlug(chainId);
+  if (!chain) return [];
+  const apiPath = "/bgw-pro/market/v3/coin/getBaseInfo";
+  const body = { chain, contract: tokenAddress };
+  const request = bitgetWalletRequest(apiPath, body);
+  if (!request) return [];
+  try {
+    const payload = await cachedCurlJson(`${process.env.BITGET_WALLET_API_BASE || BITGET_WALLET_API_BASE}${apiPath}`, {
+      ...options,
+      method: "POST",
+      headers: {
+        ...(options.headers || {}),
+        ...request.headers
+      },
+      body: request.bodyText
+    });
+    return mergeMetadataEntries([], bitgetWalletItems(payload).map(bitgetWalletEntry));
+  } catch {
+    return [];
+  }
+}
+
+function bitgetWalletWebApiUrl(pathname, locale = "zh-CN") {
+  const baseUrl = String(process.env.BITGET_WALLET_WEB_API_BASE || BITGET_WALLET_WEB_API_BASE).replace(/\/+$/, "");
+  const localeValue = String(locale || process.env.BITGET_WALLET_COININFO_LOCALE || "zh-CN").trim() || "zh-CN";
+  return `${baseUrl}${pathname}?_locale=${encodeURIComponent(localeValue)}`;
+}
+
+function bitgetWalletCoinInfoEntry(item, chain, tokenAddress, url) {
+  if (!item || typeof item !== "object") return null;
+  const itemAddress = addressKey(firstString(item.contract, item.contractAddress, item.tokenAddress, item.coinAddress, item.address, item.mint));
+  if (itemAddress && itemAddress !== addressKey(tokenAddress)) return null;
+  if (!bitgetChainMatches(firstString(item.chain, item.chainId, item.network), chain)) return null;
+  const about = firstString(item.about, item.ai_summary, item.aiSummary, item.information, item.description, item.desc, item.introduction);
+  if (!about || isLowSignalMetadataText(about)) return null;
+  const name = firstString(item.name, item.tokenName, item.coinName, item.coin);
+  const symbol = firstString(item.symbol, item.tokenSymbol, item.coinSymbol, item.coin);
+  const homepage = firstString(item.shareUrl, item.website, item.webSite, item.officialWebsite, item.homeUrl, item.homepage, url);
+  return metadataSourceEntry("bitget_wallet_coininfo", about, homepage, [name, symbol ? `$${symbol}` : ""].filter(Boolean).join(" "));
+}
+
+async function queryBitgetWalletCoinInfo(chainId, tokenAddress, options = {}) {
+  const chain = bitgetWalletChainSlug(chainId);
+  const address = String(tokenAddress || "").trim();
+  if (!chain || !address) return [];
+  const url = bitgetWalletWebApiUrl("/market/quotev2/coinInfo", options.bitgetWalletLocale || process.env.BITGET_WALLET_COININFO_LOCALE || "zh-CN");
+  try {
+    const payload = await cachedCurlJson(url, {
+      ...options,
+      method: "POST",
+      timeoutSeconds: boundedNumber(
+        options.bitgetWalletCoinInfoTimeoutSeconds || process.env.BITGET_WALLET_COININFO_TIMEOUT_SECONDS || 6,
+        6,
+        3,
+        15
+      ),
+      headers: {
+        "Accept": "application/json",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+        ...(options.headers || {})
+      },
+      body: { chain, contract: address }
+    });
+    const entry = bitgetWalletCoinInfoEntry(payload?.data, chain, address, url);
+    return entry ? [entry] : [];
+  } catch {
+    return [];
+  }
+}
+
+function bitgetWalletPageLocales() {
+  const raw = String(process.env.BITGET_WALLET_PAGE_LOCALES || "zh-CN,en").trim();
+  return raw.split(",").map((item) => item.trim()).filter(Boolean).slice(0, 3);
+}
+
+function bitgetWalletPageTargets(chainId, tokenAddress) {
+  const chain = bitgetWalletChainSlug(chainId);
+  const address = String(tokenAddress || "").trim();
+  if (!chain || !address) return [];
+  const baseUrl = String(process.env.BITGET_WALLET_WEB_BASE || "https://web3.bitget.com").replace(/\/+$/, "");
+  return bitgetWalletPageLocales().map((locale) => `${baseUrl}/${encodeURIComponent(locale)}/swap/${encodeURIComponent(chain)}/${encodeURIComponent(address)}`);
+}
+
+function parseNextData(html) {
+  const match = String(html || "").match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+  if (!match) return null;
+  const raw = match[1].trim();
+  try {
+    return JSON.parse(raw);
+  } catch {
+    try {
+      return JSON.parse(decodeHtmlEntities(raw));
+    } catch {
+      return null;
+    }
+  }
+}
+
+function bitgetChainMatches(value, expectedChain) {
+  const chain = String(value || "").trim().toLowerCase();
+  if (!chain || !expectedChain) return true;
+  if (chain === expectedChain) return true;
+  if (expectedChain === "bnb" && ["bsc", "bnb", "binance-smart-chain"].includes(chain)) return true;
+  if (expectedChain === "eth" && ["eth", "ethereum"].includes(chain)) return true;
+  if (expectedChain === "sol" && ["sol", "solana"].includes(chain)) return true;
+  if (expectedChain === "matic" && ["matic", "polygon", "polygon_pos"].includes(chain)) return true;
+  return false;
+}
+
+function bitgetPageObjectEntry(item, expectedChain, tokenAddress, url) {
+  if (!item || typeof item !== "object") return null;
+  const tokenKey = addressKey(tokenAddress);
+  const itemAddress = addressKey(firstString(
+    item.contract,
+    item.contractAddress,
+    item.tokenContractAddress,
+    item.tokenAddress,
+    item.coinAddress,
+    item.address,
+    item.mint,
+    item.baseToken?.address
+  ));
+  if (!itemAddress || itemAddress !== tokenKey) return null;
+  const itemChain = firstString(item.chain, item.chainId, item.network, item.baseChain, item.mainChain);
+  if (!bitgetChainMatches(itemChain, expectedChain)) return null;
+
+  const about = firstString(
+    item.about,
+    item.ai_summary,
+    item.aiSummary,
+    item.information,
+    item.description,
+    item.desc,
+    item.introduction
+  );
+  if (!about || isLowSignalMetadataText(about)) return null;
+  const name = firstString(item.name, item.tokenName, item.coinName, item.baseToken?.name);
+  const symbol = firstString(item.symbol, item.tokenSymbol, item.coinSymbol, item.baseToken?.symbol);
+  const homepage = firstString(item.website, item.webSite, item.officialWebsite, item.homeUrl, item.homepage, item.url, url);
+  return metadataSourceEntry("bitget_wallet_page", about, homepage, [name, symbol ? `$${symbol}` : ""].filter(Boolean).join(" "));
+}
+
+function collectBitgetPageEntries(payload, chainId, tokenAddress, url) {
+  const expectedChain = bitgetWalletChainSlug(chainId);
+  const entries = [];
+  const seen = new Set();
+  const visit = (value, depth = 0) => {
+    if (!value || depth > 9 || entries.length >= 4) return;
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, depth + 1);
+      return;
+    }
+    if (typeof value !== "object") return;
+    if (seen.has(value)) return;
+    seen.add(value);
+    const entry = bitgetPageObjectEntry(value, expectedChain, tokenAddress, url);
+    if (entry) entries.push(entry);
+    for (const child of Object.values(value)) visit(child, depth + 1);
+  };
+  visit(payload);
+  return mergeMetadataEntries([], entries);
+}
+
+async function queryBitgetWalletPageMetadata(chainId, tokenAddress, options = {}) {
+  const targets = bitgetWalletPageTargets(chainId, tokenAddress);
+  for (const url of targets) {
+    try {
+      const html = await cachedCurlText(url, {
+        ...options,
+        timeoutSeconds: boundedNumber(
+          options.bitgetWalletPageTimeoutSeconds || process.env.BITGET_WALLET_PAGE_TIMEOUT_SECONDS || 6,
+          6,
+          3,
+          15
+        ),
+        headers: {
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+          ...(options.headers || {})
+        }
+      });
+      const payload = parseNextData(html);
+      const entries = collectBitgetPageEntries(payload, chainId, tokenAddress, url);
+      if (bestMetadataDescription(entries)) return entries;
+    } catch {
+      // Try the next locale.
+    }
+  }
+  return [];
+}
+
+function bitgetWalletTxInfoEntry(payload) {
+  const data = payload?.data || {};
+  const info = data.txn_info || data.txInfo || data.tx_info || data.transactionInfo || {};
+  const h24 = info["24h"] || info.h24 || {};
+  if (!h24 || typeof h24 !== "object") return null;
+  const parts = [
+    h24.volume ? `24h volume ${compactNumber(h24.volume) || h24.volume}` : "",
+    h24.turnover ? `24h turnover ${compactNumber(h24.turnover) || h24.turnover}` : "",
+    h24.txns ? `24h txns ${h24.txns}` : "",
+    h24.buys || h24.sells ? `buys/sells ${h24.buys || 0}/${h24.sells || 0}` : "",
+    h24.buyers || h24.sellers ? `buyers/sellers ${h24.buyers || 0}/${h24.sellers || 0}` : "",
+    h24.makers ? `makers ${h24.makers}` : "",
+    h24.high || h24.low ? `high/low ${h24.high || 0}/${h24.low || 0}` : ""
+  ].filter(Boolean);
+  if (!parts.length) return null;
+  const name = firstString(data.name, data.tokenName, data.coinName);
+  const symbol = firstString(data.symbol, data.tokenSymbol, data.coinSymbol);
+  return metadataSourceEntry(
+    "bitget_wallet_txinfo",
+    `Bitget Wallet transaction supplement: ${parts.join(", ")}.`,
+    "",
+    [name, symbol ? `$${symbol}` : ""].filter(Boolean).join(" ") || "Bitget Wallet"
+  );
+}
+
+async function queryBitgetWalletTxInfo(chainId, tokenAddress, options = {}) {
+  const chain = bitgetWalletChainSlug(chainId);
+  if (!chain) return [];
+  const apiPath = "/bgw-pro/market/v3/coin/getTxInfo";
+  const body = { chain, contract: tokenAddress };
+  const request = bitgetWalletRequest(apiPath, body);
+  if (!request) return [];
+  try {
+    const payload = await cachedCurlJson(`${process.env.BITGET_WALLET_API_BASE || BITGET_WALLET_API_BASE}${apiPath}`, {
+      ...options,
+      method: "POST",
+      headers: {
+        ...(options.headers || {}),
+        ...request.headers
+      },
+      body: request.bodyText
+    });
+    const entry = bitgetWalletTxInfoEntry(payload);
+    return entry ? [entry] : [];
   } catch {
     return [];
   }
@@ -1602,8 +2033,27 @@ export async function queryTokenMetadataSources(card, dex = {}, options = {}) {
     dex.tokenName || card.name || ""
   );
   entries = mergeMetadataEntries(entries, [pairEntry]);
+  const primaryRequests = [];
+  if (chainId && enabled.has("bitget_wallet_coininfo")) {
+    primaryRequests.push(queryBitgetWalletCoinInfo(chainId, tokenAddress, options));
+  }
   if (chainId && [...enabled].some((source) => source.startsWith("dexscreener_"))) {
-    entries = mergeMetadataEntries(entries, await queryDexScreenerMetadataSources(chainId, tokenAddress, options));
+    primaryRequests.push(queryDexScreenerMetadataSources(chainId, tokenAddress, options));
+  }
+  if (primaryRequests.length) {
+    const settled = await Promise.allSettled(primaryRequests);
+    for (const result of settled) {
+      if (result.status === "fulfilled") entries = mergeMetadataEntries(entries, result.value);
+    }
+  }
+  if (chainId && enabled.has("bitget_wallet_page") && !bestMetadataDescription(entries)) {
+    entries = mergeMetadataEntries(entries, await queryBitgetWalletPageMetadata(chainId, tokenAddress, options));
+  }
+  if (chainId && enabled.has("bitget_wallet") && !bestMetadataDescription(entries)) {
+    entries = mergeMetadataEntries(entries, await queryBitgetWalletMetadata(chainId, tokenAddress, options));
+  }
+  if (chainId && enabled.has("bitget_wallet_txinfo") && process.env.BITGET_WALLET_TXINFO_ENABLED === "true") {
+    entries = mergeMetadataEntries(entries, await queryBitgetWalletTxInfo(chainId, tokenAddress, options));
   }
   if (chainId && enabled.has("pumpfun")) {
     entries = mergeMetadataEntries(entries, await queryPumpFunMetadata(chainId, tokenAddress, options));

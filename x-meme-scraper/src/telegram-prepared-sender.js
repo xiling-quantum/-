@@ -56,11 +56,44 @@ function safeNumber(value, fallback, min, max) {
   return Math.max(min, Math.min(max, Math.trunc(number)));
 }
 
+function boolValue(value, fallback = false) {
+  if (value === undefined || value === null || value === "") return fallback;
+  return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
+}
+
+function dedupeEnabled() {
+  return boolValue(argValue("dedupeEnabled", process.env.TELEGRAM_DEDUPE_ENABLED || "false"), false);
+}
+
 function sendDelayMs(count, minutes, perMinute) {
   if (count <= 0) return 0;
   const windowDelay = count > 1 ? Math.ceil((minutes * 60 * 1000) / (count - 1)) : 0;
   const rateLimitDelay = Math.ceil(60000 / Math.max(1, perMinute));
   return Math.max(2000, windowDelay, rateLimitDelay);
+}
+
+function dedupeWindowHours() {
+  return safeNumber(argValue("dedupeHours", process.env.TELEGRAM_DEDUPE_HOURS || "10"), 10, 0, 720);
+}
+
+function sentTimestamp(record) {
+  const sentAt = typeof record === "string" ? record : record?.sentAt;
+  const timestamp = Date.parse(sentAt || "");
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function sentRecently(record, now = Date.now()) {
+  const timestamp = sentTimestamp(record);
+  if (!timestamp) return false;
+  const windowMs = dedupeWindowHours() * 60 * 60 * 1000;
+  return windowMs > 0 && timestamp >= now - windowMs;
+}
+
+function shouldStoreSentRecord(existing, sentAt) {
+  const nextTimestamp = Date.parse(sentAt || "");
+  if (!Number.isFinite(nextTimestamp)) return !existing;
+  const existingTimestamp = sentTimestamp(existing);
+  return !existingTimestamp || nextTimestamp > existingTimestamp;
 }
 
 async function readSentContracts() {
@@ -193,10 +226,11 @@ async function seedContractHistoryFromTelegram(client, items, targetCache, sentC
         const address = extractCardAddress(message.message || "");
         if (!address) continue;
         const key = contractKey(address);
-        if (!sentContracts[key]) {
+        const sentAt = message.date ? new Date(message.date * 1000).toISOString() : new Date().toISOString();
+        if (shouldStoreSentRecord(sentContracts[key], sentAt)) {
           sentContracts[key] = {
             address,
-            sentAt: message.date ? new Date(message.date * 1000).toISOString() : new Date().toISOString(),
+            sentAt,
             target: target.label,
             source: "telegram-history"
           };
@@ -228,10 +262,11 @@ async function seedSpecialHistoryFromTelegram(client, item, targetCache, sentSpe
       const address = extractCardAddress(message.message || "");
       if (!address) continue;
       const key = contractKey(address);
-      if (!sentSpecial[key]) {
+      const sentAt = message.date ? new Date(message.date * 1000).toISOString() : new Date().toISOString();
+      if (shouldStoreSentRecord(sentSpecial[key], sentAt)) {
         sentSpecial[key] = {
           address,
-          sentAt: message.date ? new Date(message.date * 1000).toISOString() : new Date().toISOString(),
+          sentAt,
           target: target.title || target.username || target.id || target.target || "",
           source: "telegram-history"
         };
@@ -273,14 +308,19 @@ async function main() {
   try {
     const sentContracts = await readSentContracts();
     const sentSpecial = await readSentSpecial();
-    await seedContractHistoryFromTelegram(client, items, targetCache, sentContracts);
-    const firstSpecialItem = items.find((item) => item.history === "special" && item.address);
-    if (firstSpecialItem) await seedSpecialHistoryFromTelegram(client, firstSpecialItem, targetCache, sentSpecial);
+    const dedupe = dedupeEnabled();
+    if (dedupe) {
+      await seedContractHistoryFromTelegram(client, items, targetCache, sentContracts);
+      const firstSpecialItem = items.find((item) => item.history === "special" && item.address);
+      if (firstSpecialItem) await seedSpecialHistoryFromTelegram(client, firstSpecialItem, targetCache, sentSpecial);
+    }
     const seenInPrepared = new Set();
     let skippedSpecial = 0;
     let skippedContract = 0;
     let skippedPreparedDuplicate = 0;
-    const pendingItems = items.filter((item) => {
+    const dedupeHours = dedupeWindowHours();
+    const now = Date.now();
+    const pendingItems = dedupe ? items.filter((item) => {
       if (!item.address || (item.history !== "special" && item.history !== "contract")) return true;
       const key = contractKey(item.address);
       if (seenInPrepared.has(key)) {
@@ -288,22 +328,23 @@ async function main() {
         return false;
       }
       seenInPrepared.add(key);
-      if (item.history === "special" && sentSpecial[key]) {
+      if (item.history === "special" && sentRecently(sentSpecial[key], now)) {
         skippedSpecial += 1;
         return false;
       }
-      if (item.history === "contract" && sentContracts[key]) {
+      if (item.history === "contract" && sentRecently(sentContracts[key], now)) {
         skippedContract += 1;
         return false;
       }
       return true;
-    });
+    }) : items;
     const minutes = safeNumber(prepared.sendWindowMinutes, 30, 1, 180);
     const perMinute = safeNumber(prepared.sendPerMinute, 4, 1, 240);
     const delayMs = sendDelayMs(pendingItems.length, minutes, perMinute);
     console.log(
       `Prepared sender: ${prepared.source || input}; ${pendingItems.length}/${items.length} items over ${minutes}m, ` +
       `max ${perMinute}/min, delay ${Math.round(delayMs / 1000)}s, ` +
+      `dedupe ${dedupe ? `enabled ${dedupeHours}h` : "disabled"}, ` +
       `skipped special duplicates ${skippedSpecial}, contract duplicates ${skippedContract}, ` +
       `prepared duplicates ${skippedPreparedDuplicate}.`
     );

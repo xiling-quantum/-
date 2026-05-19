@@ -336,6 +336,17 @@ function sendDelayMs(count, minutes, perMinute) {
   return Math.max(2000, windowDelay, rateLimitDelay);
 }
 
+function dedupeWindowHours() {
+  return safeNumber(argValue("dedupeHours", process.env.TELEGRAM_DEDUPE_HOURS || "10"), 10, 0, 720);
+}
+
+function sentRecently(sentAt, now = Date.now()) {
+  const timestamp = Date.parse(sentAt || "");
+  if (!Number.isFinite(timestamp)) return false;
+  const windowMs = dedupeWindowHours() * 60 * 60 * 1000;
+  return windowMs > 0 && timestamp >= now - windowMs;
+}
+
 function pairCreatedTimestamp(card) {
   const timestamp = Date.parse(card?.pairCreatedAt || "");
   return Number.isFinite(timestamp) ? timestamp : null;
@@ -376,11 +387,13 @@ async function sendMessageWithFloodWait(client, target, message) {
 
 async function sentAddressesFromTelegram(client, target) {
   const sent = new Set();
+  const now = Date.now();
   try {
     const messages = await withTimeout(client.getMessages(target, { limit: 1000 }), 90_000, "read sent Telegram history");
     for (const message of messages) {
       const address = extractCardAddress(message.message || "");
-      if (address) sent.add(contractKey(address));
+      const sentAt = message.date ? new Date(message.date * 1000).toISOString() : "";
+      if (address && sentRecently(sentAt, now)) sent.add(contractKey(address));
     }
   } catch (error) {
     console.log(`Could not read sent Telegram history: ${error.message}`);
@@ -561,7 +574,7 @@ async function notifySpecial(client, config, payload) {
     return { sent: 1, cards: cards.length, skipped };
   }
   const delayMs = sendDelayMs(pendingCards.length, config.sendWindowMinutes, config.sendPerMinute);
-  console.log(`Special Telegram pacing: ${pendingCards.length}/${cards.length} cards over ${config.sendWindowMinutes}m, max ${config.sendPerMinute}/min, delay ${Math.round(delayMs / 1000)}s, skipped=${skipped}.`);
+  console.log(`Special Telegram pacing: ${pendingCards.length}/${cards.length} cards over ${config.sendWindowMinutes}m, max ${config.sendPerMinute}/min, delay ${Math.round(delayMs / 1000)}s, dedupe window ${dedupeWindowHours()}h, skipped=${skipped}.`);
   const releaseSendLock = await acquireTelegramSendLock("telegram-special-cycle");
   let sent = 0;
   try {

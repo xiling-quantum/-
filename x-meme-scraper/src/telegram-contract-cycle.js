@@ -51,6 +51,12 @@ function argValue(name, fallback) {
   return inline ? inline.slice(name.length + 3) : fallback;
 }
 
+function safeNumber(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(number)));
+}
+
 function csvCell(value) {
   return `"${String(value ?? "").replaceAll('"', '""')}"`;
 }
@@ -285,6 +291,30 @@ function sendDelayMs(pendingCount) {
   return Math.max(2000, windowDelay, rateLimitDelay);
 }
 
+function dedupeWindowHours() {
+  return safeNumber(argValue("dedupeHours", process.env.TELEGRAM_DEDUPE_HOURS || "10"), 10, 0, 720);
+}
+
+function sentTimestamp(record) {
+  const sentAt = typeof record === "string" ? record : record?.sentAt;
+  const timestamp = Date.parse(sentAt || "");
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function sentRecently(record, now = Date.now()) {
+  const timestamp = sentTimestamp(record);
+  if (!timestamp) return false;
+  const windowMs = dedupeWindowHours() * 60 * 60 * 1000;
+  return windowMs > 0 && timestamp >= now - windowMs;
+}
+
+function shouldStoreSentRecord(existing, sentAt) {
+  const nextTimestamp = Date.parse(sentAt || "");
+  if (!Number.isFinite(nextTimestamp)) return !existing;
+  const existingTimestamp = sentTimestamp(existing);
+  return !existingTimestamp || nextTimestamp > existingTimestamp;
+}
+
 async function readSentContracts() {
   try {
     return JSON.parse(await fs.readFile(sentContractsPath, "utf8"));
@@ -308,10 +338,11 @@ async function seedSentContractsFromTelegram(client, sentContracts) {
       const address = extractCardAddress(message.message || "");
       if (!address) continue;
       const key = contractKey(address);
-      if (!sentContracts[key]) {
+      const sentAt = message.date ? new Date(message.date * 1000).toISOString() : new Date().toISOString();
+      if (shouldStoreSentRecord(sentContracts[key], sentAt)) {
         sentContracts[key] = {
           address,
-          sentAt: message.date ? new Date(message.date * 1000).toISOString() : new Date().toISOString(),
+          sentAt,
           source: "telegram-history"
         };
       }
@@ -534,10 +565,11 @@ async function buildPreparedContractPayload(cards) {
   let skipped = 0;
   let normalCount = 0;
   let repeatCount = 0;
+  const now = Date.now();
 
   for (const card of cards) {
     const key = contractKey(card.address);
-    if (skipAlreadySent && sentContracts[key]) {
+    if (skipAlreadySent && sentRecently(sentContracts[key], now)) {
       skipped += 1;
       continue;
     }
@@ -561,7 +593,7 @@ async function buildPreparedContractPayload(cards) {
 
   console.log(
     `Prepared contract routing: ${normalCount} to ${notifyTarget() || "TELEGRAM_NOTIFY_TARGET"}, ` +
-    `${repeatCount} to ${repeatTarget}; skipped already sent: ${skipped}.`
+    `${repeatCount} to ${repeatTarget}; skipped already sent within ${dedupeWindowHours()}h: ${skipped}.`
   );
   return {
     source: "telegram-contracts",
@@ -654,9 +686,10 @@ async function notifyMany(cards) {
     const pendingItems = [];
     let normalCount = 0;
     let repeatCount = 0;
+    const now = Date.now();
     for (const card of cards) {
       const key = contractKey(card.address);
-      if (skipAlreadySent && sentContracts[key]) {
+      if (skipAlreadySent && sentRecently(sentContracts[key], now)) {
         skippedCount += 1;
         continue;
       }
@@ -669,7 +702,8 @@ async function notifyMany(cards) {
     const delayMs = sendDelayMs(pendingItems.length);
     console.log(
       `Telegram notification pacing: ${pendingItems.length} cards over ${Math.round(sendWindowMs() / 60000)}m, ` +
-      `max ${sendPerMinute()}/min, delay ${Math.round(delayMs / 1000)}s, skipAlreadySent=${skipAlreadySent}.`
+      `max ${sendPerMinute()}/min, delay ${Math.round(delayMs / 1000)}s, ` +
+      `skipAlreadySent=${skipAlreadySent}, dedupe window ${dedupeWindowHours()}h.`
     );
     console.log(
       `Telegram routing: ${normalCount} to ${notifyTarget() || "TELEGRAM_NOTIFY_TARGET"}, ` +
