@@ -20,10 +20,7 @@ TELEGRAM_API_HASH=...
 TELEGRAM_STRING_SESSION=...
 TELEGRAM_NOTIFY_TARGET=me
 TELEGRAM_PROXY_URL=socks5://127.0.0.1:7897
-TELEGRAM_SEND_LOCK_FILE=../x-meme-scraper/data/telegram-send.lock
 ```
-
-When user-session mode is enabled, the monitor connects to Telegram only while sending a new alert. `TELEGRAM_SEND_LOCK_FILE` serializes sends with other local Telegram jobs that share the same GramJS session.
 
 For a group, send any message in the group, then open:
 
@@ -38,12 +35,9 @@ Use the returned `chat.id`.
 ```bash
 npm install
 .\scripts\init-env.ps1
-npm run telegram:login
 npm run once
 npm start
 ```
-
-Run `npm run telegram:login` again if Telegram returns `AUTH_KEY_DUPLICATED`; it creates a fresh GramJS user session and updates `.env`.
 
 By default, the first startup records existing GMGN trades without pushing them, so Telegram only receives new trades after the service starts. Set `STARTUP_SUPPRESS_EXISTING=false` if you want the first run to push current results.
 

@@ -34,7 +34,6 @@ export function loadConfig() {
     telegramStringSession: optional(process.env.TELEGRAM_STRING_SESSION),
     telegramNotifyTarget: optional(process.env.TELEGRAM_NOTIFY_TARGET) ?? "me",
     telegramProxyUrl: optional(process.env.TELEGRAM_PROXY_URL),
-    telegramSendLockFile: path.resolve(rootDir, optional(process.env.TELEGRAM_SEND_LOCK_FILE) ?? "../x-meme-scraper/data/telegram-send.lock"),
     chain: optional(process.env.CHAIN) ?? "sol",
     pollIntervalMs: Math.max(5, toInt(process.env.POLL_INTERVAL_SECONDS, 10)) * 1000,
     limit: Math.min(100, Math.max(1, toInt(process.env.LIMIT, 50))),
