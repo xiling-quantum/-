@@ -5,6 +5,7 @@ import { sendTelegramMessage } from "./telegram.js";
 import { loadState, saveState, tradeKey } from "./store.js";
 import { configureProxy } from "./proxy.js";
 import { enrichTradeNarratives } from "./narrative.js";
+import { loadWalletAliases } from "./walletAliases.js";
 
 const once = process.argv.includes("--once");
 
@@ -44,7 +45,8 @@ async function poll(config, state) {
     } catch (error) {
       console.error(`[${new Date().toISOString()}] Narrative enrichment failed: ${error.message}`);
     }
-    await sendTelegramMessage(config, formatTradeCards(fresh, "GMGN Follow Wallet", narratives));
+    const walletAliases = await loadWalletAliases(config.walletAliasFile);
+    await sendTelegramMessage(config, formatTradeCards(fresh, "GMGN Follow Wallet", narratives, walletAliases));
     for (const trade of fresh) {
       const key = tradeKey(trade);
       seen.add(key);

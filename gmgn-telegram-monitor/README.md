@@ -47,7 +47,20 @@ By default, the first startup records existing GMGN trades without pushing them,
 - `SIDE`: `all`, `buy`, or `sell`
 - `MIN_AMOUNT_USD` / `MAX_AMOUNT_USD`: amount filters
 - `WALLET_FILTER`: one followed wallet address
+- `WALLET_ALIAS_FILE`: optional local JSON/CSV/TSV mapping from wallet address to alias
 - `LIMIT`: GMGN page size, `1` to `100`
+
+## Wallet Aliases
+
+GMGN's OpenAPI trade feed may not include your private follow-list remarks. Export wallet address and note name from GMGN, then save it as `data/wallet-aliases.json`:
+
+```json
+{
+  "2h6WT2yEMhpdLQRRX5tm58bEt174sbNZq7tMqzVtm3PW": "A"
+}
+```
+
+CSV and TSV files are also accepted when they contain address/name, wallet/remark, or Chinese `地址`/`备注` columns.
 
 ## Notes
 

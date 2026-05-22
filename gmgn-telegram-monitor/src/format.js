@@ -94,7 +94,14 @@ function tokenLabel(trade) {
   return trade.base_token?.symbol || short(trade.base_address);
 }
 
-function walletLabel(trade) {
+function walletAlias(walletAliases, address) {
+  if (!walletAliases || !address) return "";
+  return walletAliases.get(address) || walletAliases.get(String(address).toLowerCase()) || "";
+}
+
+function walletLabel(trade, walletAliases = new Map()) {
+  const alias = walletAlias(walletAliases, trade.maker);
+  if (alias) return `${alias} / ${short(trade.maker)}`;
   const name = trade.maker_info?.name || trade.maker_info?.twitter_username;
   if (name) return `${name} / ${short(trade.maker)}`;
   return short(trade.maker);
@@ -143,13 +150,13 @@ export function formatTrade(trade) {
   return lines.join("\n");
 }
 
-export function formatTradeTable(trades, title = "结果摘要：") {
+export function formatTradeTable(trades, title = "结果摘要：", walletAliases = new Map()) {
   const rows = trades.map((trade, index) => ({
     index: String(index + 1),
     side: String(trade.side || "-").toLowerCase(),
     token: tableValue(tokenLabel(trade), 14),
     amount: moneyCompact(trade.amount_usd),
-    wallet: tableValue(walletLabel(trade), 14),
+    wallet: tableValue(walletLabel(trade, walletAliases), 14),
     time: tradeTimeShanghai(trade.timestamp),
   }));
 
@@ -186,7 +193,7 @@ function narrativeForTrade(trade, narratives) {
   return item.briefNarrative || item.narrative || item.metadataDescription || "";
 }
 
-export function formatTradeCards(trades, title = "GMGN Follow Wallet", narratives = new Map()) {
+export function formatTradeCards(trades, title = "GMGN Follow Wallet", narratives = new Map(), walletAliases = new Map()) {
   const now = tradeTimeShanghaiShort(Date.now() / 1000);
   const lines = [
     `<b>${html(title)}</b>`,
@@ -198,7 +205,7 @@ export function formatTradeCards(trades, title = "GMGN Follow Wallet", narrative
     const direction = directionLabel(trade.side);
     const token = tableValue(tokenLabel(trade), 18);
     const amount = moneyCompact(trade.amount_usd);
-    const wallet = walletLabel(trade);
+    const wallet = walletLabel(trade, walletAliases);
     const time = tradeTimeShanghaiShort(trade.timestamp);
     const links = tradeLinks(trade);
 
