@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/index.js",
     "once": "node src/index.js --once",
+    "telegram:login": "node scripts/telegram-login.js",
     "check:gmgn": "gmgn-cli market trending --chain sol --interval 1h --limit 3 --raw"
   },
   "dependencies": {
