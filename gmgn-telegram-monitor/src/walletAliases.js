@@ -32,6 +32,13 @@ function addAlias(map, address, alias) {
   map.set(key.toLowerCase(), value);
 }
 
+function addAliasObject(target, address, alias) {
+  const key = clean(address);
+  const value = clean(alias);
+  if (!key || !value || !isAddress(key)) return;
+  target[key] = value;
+}
+
 function pickField(row, candidates) {
   for (const key of candidates) {
     if (row[key] != null && clean(row[key])) return row[key];
@@ -67,6 +74,52 @@ function loadJsonAliases(text) {
   }
 
   return map;
+}
+
+async function loadJsonAliasObject(filePath) {
+  let text;
+  try {
+    text = await fs.readFile(filePath, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return {};
+    throw error;
+  }
+
+  const parsed = JSON.parse(text);
+  const result = {};
+
+  if (Array.isArray(parsed)) {
+    for (const row of parsed) {
+      if (!row || typeof row !== "object") continue;
+      addAliasObject(
+        result,
+        pickField(row, ADDRESS_KEYS),
+        pickField(row, ALIAS_KEYS)
+      );
+    }
+    return result;
+  }
+
+  if (parsed && typeof parsed === "object") {
+    for (const [address, alias] of Object.entries(parsed)) {
+      addAliasObject(result, address, alias);
+    }
+  }
+
+  return result;
+}
+
+function nextNumberAlias(existing) {
+  let max = 0;
+  for (const alias of Object.values(existing)) {
+    const match = clean(alias).match(/^(\d+)\u53f7$/);
+    if (match) max = Math.max(max, Number(match[1]));
+  }
+  return `${max + 1}\u53f7`;
+}
+
+function walletAddressFromTrade(trade) {
+  return clean(trade?.maker || trade?.maker_info?.address);
 }
 
 function parseDelimited(text, delimiter) {
@@ -151,4 +204,32 @@ export async function loadWalletAliases(filePath) {
   if (ext === ".csv") return loadTableAliases(text, ",");
   if (ext === ".tsv" || ext === ".txt") return loadTableAliases(text, "\t");
   return loadJsonAliases(text);
+}
+
+export async function ensureAutoWalletAliases(filePath, trades) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (!filePath || (ext && ext !== ".json")) {
+    return loadWalletAliases(filePath);
+  }
+
+  const aliases = await loadJsonAliasObject(filePath);
+  let changed = false;
+
+  for (const trade of trades) {
+    const address = walletAddressFromTrade(trade);
+    if (!address || aliases[address] || aliases[address.toLowerCase()]) continue;
+    aliases[address] = nextNumberAlias(aliases);
+    changed = true;
+  }
+
+  if (changed) {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, `${JSON.stringify(aliases, null, 2)}\n`, "utf8");
+  }
+
+  const map = new Map();
+  for (const [address, alias] of Object.entries(aliases)) {
+    addAlias(map, address, alias);
+  }
+  return map;
 }

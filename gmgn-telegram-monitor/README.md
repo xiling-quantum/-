@@ -48,6 +48,7 @@ By default, the first startup records existing GMGN trades without pushing them,
 - `MIN_AMOUNT_USD` / `MAX_AMOUNT_USD`: amount filters
 - `WALLET_FILTER`: one followed wallet address
 - `WALLET_ALIAS_FILE`: optional local JSON/CSV/TSV mapping from wallet address to alias
+- `WALLET_AUTO_NUMBER_ALIASES`: auto-assign `1号`, `2号`, etc. to newly seen wallets and keep old numbers
 - `LIMIT`: GMGN page size, `1` to `100`
 
 ## Wallet Aliases
@@ -61,6 +62,8 @@ GMGN's OpenAPI trade feed may not include your private follow-list remarks. Expo
 ```
 
 CSV and TSV files are also accepted when they contain address/name, wallet/remark, or Chinese `地址`/`备注` columns.
+
+When `WALLET_AUTO_NUMBER_ALIASES=true`, the monitor writes new wallets to the JSON alias file with the next available number. Removed wallets stay in the file, so existing numbers are not changed.
 
 ## Notes
 

@@ -42,6 +42,7 @@ export function loadConfig() {
     maxAmountUsd: optional(process.env.MAX_AMOUNT_USD),
     walletFilter: optional(process.env.WALLET_FILTER),
     walletAliasFile: path.resolve(rootDir, optional(process.env.WALLET_ALIAS_FILE) ?? "data/wallet-aliases.json"),
+    walletAutoNumberAliases: toBool(process.env.WALLET_AUTO_NUMBER_ALIASES, true),
     dryRun: toBool(process.env.DRY_RUN, false),
     startupSuppressExisting: toBool(process.env.STARTUP_SUPPRESS_EXISTING, true),
     maxMessagesPerPoll: Math.max(1, toInt(process.env.MAX_MESSAGES_PER_POLL, 20)),
