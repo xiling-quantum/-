@@ -7,7 +7,6 @@ import { StringSession } from "telegram/sessions/index.js";
 import { loadLocalEnv, parseSocksProxy } from "./local-env.js";
 import { formatTelegramBatchNotification, sendTelegramNotification, telegramNotifyConfigured } from "./telegram-notify.js";
 import { annotateRepeatedContracts, extractContractAddresses, extractTokenInfo } from "./telegram-contracts.js";
-import { acquireTelegramSendLock } from "./telegram-send-lock.js";
 
 loadLocalEnv();
 
@@ -173,19 +172,18 @@ async function main() {
     connectionRetries: 5,
     proxy
   });
-  const releaseSessionLock = await acquireTelegramSendLock("telegram-scrape");
+  await client.connect();
+  const resolvedSenders = await resolveSenderFilters(client, senderFilters);
+  const targetItems = allDialogs
+    ? await readDialogTargets(client, excludeGroups, dialogLimit)
+    : configuredTargets.map((target) => ({ target, entity: null, title: target }));
+  const targets = targetItems.map((item) => item.target);
+
+  if (!targetItems.length) {
+    throw new Error("No Telegram groups matched the current selection.");
+  }
+
   try {
-    await client.connect();
-    const resolvedSenders = await resolveSenderFilters(client, senderFilters);
-    const targetItems = allDialogs
-      ? await readDialogTargets(client, excludeGroups, dialogLimit)
-      : configuredTargets.map((target) => ({ target, entity: null, title: target }));
-    const targets = targetItems.map((item) => item.target);
-
-    if (!targetItems.length) {
-      throw new Error("No Telegram groups matched the current selection.");
-    }
-
     const accounts = [];
     const errors = [];
     const posts = [];
@@ -294,11 +292,7 @@ async function main() {
     console.log(`JSON: ${jsonPath}`);
     console.log(`CSV:  ${csvPath}`);
   } finally {
-    try {
-      await client.disconnect();
-    } finally {
-      await releaseSessionLock();
-    }
+    await client.disconnect();
   }
 }
 

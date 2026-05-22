@@ -7,7 +7,6 @@ import { NewMessage } from "telegram/events/index.js";
 import { StringSession } from "telegram/sessions/index.js";
 import { loadLocalEnv, parseSocksProxy } from "./local-env.js";
 import { formatTelegramPostNotification, sendTelegramNotification, telegramNotifyConfigured } from "./telegram-notify.js";
-import { acquireTelegramSendLock } from "./telegram-send-lock.js";
 
 loadLocalEnv();
 
@@ -269,7 +268,6 @@ async function main() {
     connectionRetries: 5,
     proxy
   });
-  const releaseSessionLock = await acquireTelegramSendLock("telegram-live");
   await client.connect();
   const resolvedSenders = await resolveSenderFilters(client, senderFilters);
   filters.senderIds = [...resolvedSenders.ids];
@@ -355,20 +353,12 @@ async function main() {
 
   process.on("SIGINT", async () => {
     emit({ type: "stopping" });
-    try {
-      await client.disconnect();
-    } finally {
-      await releaseSessionLock();
-    }
+    await client.disconnect();
     process.exit(0);
   });
   process.on("SIGTERM", async () => {
     emit({ type: "stopping" });
-    try {
-      await client.disconnect();
-    } finally {
-      await releaseSessionLock();
-    }
+    await client.disconnect();
     process.exit(0);
   });
 }

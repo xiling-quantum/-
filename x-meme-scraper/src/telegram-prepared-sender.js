@@ -188,33 +188,6 @@ async function sendWithFloodWait(client, item, targetCache) {
   }
 }
 
-function createTelegramClient(apiId, apiHash, stringSession) {
-  return new TelegramClient(new StringSession(stringSession), apiId, apiHash, {
-    connectionRetries: 5,
-    proxy: parseSocksProxy(process.env.TELEGRAM_PROXY_URL)
-  });
-}
-
-async function sendItemWithLock(apiId, apiHash, stringSession, item, source, index, total) {
-  const releaseSendLock = await acquireTelegramSendLock(
-    `telegram-prepared-sender:${source}:item-${index + 1}-of-${total}`,
-    { pollMs: 5000 }
-  );
-  const client = createTelegramClient(apiId, apiHash, stringSession);
-  const targetCache = new Map();
-  try {
-    await client.connect();
-    return await sendWithFloodWait(client, item, targetCache);
-  } finally {
-    try {
-      await client.disconnect();
-    } catch {
-      // The connection may already be closed after a send failure.
-    }
-    await releaseSendLock();
-  }
-}
-
 async function targetEntityForHistory(client, item, targetCache) {
   const target = item.target || {};
   if (target.mode === "default") {
@@ -324,27 +297,22 @@ async function main() {
   const stringSession = String(process.env.TELEGRAM_STRING_SESSION || "").trim();
   if (!apiId || !apiHash || !stringSession) throw new Error("Telegram session config is missing.");
 
+  const client = new TelegramClient(new StringSession(stringSession), apiId, apiHash, {
+    connectionRetries: 5,
+    proxy: parseSocksProxy(process.env.TELEGRAM_PROXY_URL)
+  });
   const targetCache = new Map();
+  await client.connect();
+  const releaseSendLock = await acquireTelegramSendLock(`telegram-prepared-sender:${prepared.source || "unknown"}`);
   let sent = 0;
   try {
     const sentContracts = await readSentContracts();
     const sentSpecial = await readSentSpecial();
     const dedupe = dedupeEnabled();
     if (dedupe) {
-      const client = createTelegramClient(apiId, apiHash, stringSession);
-      const releaseSessionLock = await acquireTelegramSendLock("telegram-prepared-sender:seed", { pollMs: 5000 });
-      try {
-        await client.connect();
-        await seedContractHistoryFromTelegram(client, items, targetCache, sentContracts);
-        const firstSpecialItem = items.find((item) => item.history === "special" && item.address);
-        if (firstSpecialItem) await seedSpecialHistoryFromTelegram(client, firstSpecialItem, targetCache, sentSpecial);
-      } finally {
-        try {
-          await client.disconnect();
-        } finally {
-          await releaseSessionLock();
-        }
-      }
+      await seedContractHistoryFromTelegram(client, items, targetCache, sentContracts);
+      const firstSpecialItem = items.find((item) => item.history === "special" && item.address);
+      if (firstSpecialItem) await seedSpecialHistoryFromTelegram(client, firstSpecialItem, targetCache, sentSpecial);
     }
     const seenInPrepared = new Set();
     let skippedSpecial = 0;
@@ -383,15 +351,7 @@ async function main() {
     if (!pendingItems.length) return;
     for (let index = 0; index < pendingItems.length; index += 1) {
       const item = pendingItems[index];
-      const targetLabel = await sendItemWithLock(
-        apiId,
-        apiHash,
-        stringSession,
-        item,
-        prepared.source || "unknown",
-        index,
-        pendingItems.length
-      );
+      const targetLabel = await sendWithFloodWait(client, item, targetCache);
       sent += 1;
       if (item.history === "contract" && item.address) {
         sentContracts[contractKey(item.address)] = {
@@ -419,7 +379,8 @@ async function main() {
       if (index < pendingItems.length - 1 && delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   } finally {
-    // Each send owns and releases the global Telegram send lock independently.
+    await releaseSendLock();
+    await client.disconnect();
   }
   console.log(`Prepared sender complete: ${sent}/${items.length}.`);
 }

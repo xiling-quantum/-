@@ -138,7 +138,7 @@ async function readConfig() {
     dexConcurrency: safeNumber(argValue("dexConcurrency", config.dexConcurrency || process.env.DEXSCREENER_CONCURRENCY || 4), 4, 1, 8),
     mentionWindowHours: safeNumber(argValue("mentionWindowHours", config.mentionWindowHours || 48), 48, 1, 168),
     onChainAgeHours: safeNumber(argValue("onChainAgeHours", config.onChainAgeHours || 12), 12, 1, 168),
-    skipAlreadySent: boolValue(argValue("skipAlreadySent", process.env.TELEGRAM_SKIP_ALREADY_SENT || "false"), false)
+    skipAlreadySent: boolValue(argValue("skipAlreadySent", config.skipAlreadySent), true)
   };
 }
 
@@ -502,7 +502,7 @@ function buildSpecialPreparedFromCards(cards, config) {
 
 async function streamSpecialBatches(config, payload) {
   const baseCards = selectSpecialBaseCards(payload);
-  const batchSize = safeNumber(argValue("batchSize", process.env.TELEGRAM_SPECIAL_BATCH_SIZE || 80), 80, 5, 250);
+  const batchSize = safeNumber(argValue("batchSize", process.env.TELEGRAM_SPECIAL_BATCH_SIZE || 80), 80, 20, 250);
   const allEligible = [];
   let foundTotal = 0;
   let launched = 0;
@@ -574,16 +574,21 @@ async function notifySpecial(client, config, payload) {
     return { sent: 1, cards: cards.length, skipped };
   }
   const delayMs = sendDelayMs(pendingCards.length, config.sendWindowMinutes, config.sendPerMinute);
-  console.log(`Special Telegram pacing: ${pendingCards.length}/${cards.length} cards over ${config.sendWindowMinutes}m, max ${config.sendPerMinute}/min, delay ${Math.round(delayMs / 1000)}s, dedupe ${config.skipAlreadySent ? `${dedupeWindowHours()}h` : "disabled"}, skipped=${skipped}.`);
+  console.log(`Special Telegram pacing: ${pendingCards.length}/${cards.length} cards over ${config.sendWindowMinutes}m, max ${config.sendPerMinute}/min, delay ${Math.round(delayMs / 1000)}s, dedupe window ${dedupeWindowHours()}h, skipped=${skipped}.`);
+  const releaseSendLock = await acquireTelegramSendLock("telegram-special-cycle");
   let sent = 0;
-  for (let index = 0; index < pendingCards.length; index += 1) {
-    const card = pendingCards[index];
-    await sendMessageWithFloodWait(client, target, formatSpecialCard(card, config.mentionWindowHours));
-    sent += 1;
-    if (sent === 1 || sent % 20 === 0 || sent === pendingCards.length) {
-      console.log(`Special Telegram sent ${sent}/${pendingCards.length}.`);
+  try {
+    for (let index = 0; index < pendingCards.length; index += 1) {
+      const card = pendingCards[index];
+      await sendMessageWithFloodWait(client, target, formatSpecialCard(card, config.mentionWindowHours));
+      sent += 1;
+      if (sent === 1 || sent % 20 === 0 || sent === pendingCards.length) {
+        console.log(`Special Telegram sent ${sent}/${pendingCards.length}.`);
+      }
+      if (index < pendingCards.length - 1 && delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
-    if (index < pendingCards.length - 1 && delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+  } finally {
+    await releaseSendLock();
   }
   return { sent, cards: cards.length, skipped };
 }
@@ -631,9 +636,8 @@ async function main() {
     connectionRetries: 5,
     proxy: parseSocksProxy(process.env.TELEGRAM_PROXY_URL)
   });
-  const releaseSessionLock = await acquireTelegramSendLock("telegram-special-cycle");
+  await client.connect();
   try {
-    await client.connect();
     const result = await scrapeSpecialGroups(client, config);
     const contractSummary = annotateRepeatedContracts(result.posts);
     const payload = {
@@ -670,11 +674,7 @@ async function main() {
     console.log(`CSV: ${outputs.csvPath}`);
     console.log(`Sent: ${notifyResult.sent}; cards: ${notifyResult.cards}; dryRun: ${Boolean(notifyResult.dryRun)}`);
   } finally {
-    try {
-      await client.disconnect();
-    } finally {
-      await releaseSessionLock();
-    }
+    await client.disconnect();
   }
 }
 

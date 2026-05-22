@@ -7,12 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..");
 const dataDir = path.join(projectRoot, "data");
-const lockPath = path.resolve(
-  projectRoot,
-  process.env.TELEGRAM_SESSION_LOCK_FILE ||
-    process.env.TELEGRAM_SEND_LOCK_FILE ||
-    "../telegram-session.lock"
-);
+const lockPath = path.join(dataDir, "telegram-send.lock");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
