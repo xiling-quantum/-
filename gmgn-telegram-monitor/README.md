@@ -20,10 +20,10 @@ TELEGRAM_API_HASH=...
 TELEGRAM_STRING_SESSION=...
 TELEGRAM_NOTIFY_TARGET=me
 TELEGRAM_PROXY_URL=socks5://127.0.0.1:7897
-TELEGRAM_SEND_LOCK_FILE=../x-meme-scraper/data/telegram-send.lock
+TELEGRAM_SEND_LOCK_FILE=data/telegram-send.lock
 ```
 
-When user-session mode is enabled, the monitor connects to Telegram only while sending a new alert. `TELEGRAM_SEND_LOCK_FILE` serializes sends with other local Telegram jobs that share the same GramJS session.
+When user-session mode is enabled, the monitor connects to Telegram only while sending a new alert. Keep `TELEGRAM_STRING_SESSION` and `TELEGRAM_SEND_LOCK_FILE` independent from other local projects.
 
 For a group, send any message in the group, then open:
 
