@@ -41,7 +41,16 @@ const EXCLUDE_GROUPS = [
   "\u6bcf\u65e5\u603b\u7ed3\uff5c\u4e8c\u5a03\u805a\u5408",
   "\u6240\u6709\u7981\u8a00\u7fa4",
   "\u5931\u7720\u805a\u5408\u7fa4\u4ea4\u6d41",
-  "\u4e8c\u5a03\u805a\u5408"
+  "\u805a\u5408\u7fa4\u7684\u7fa4\u53cb",
+  "\u4e8c\u5a03\u805a\u5408",
+  "AKAKAY",
+  "CryptoD",
+  "0xSun",
+  "CrazySen",
+  "\u8f90\u5c04\u732b",
+  "HTTP-\u9879\u76ee\u7fa4",
+  "GDC",
+  "\u4e2d\u56fd\u4e07\u5c81"
 ];
 
 function argValue(name, fallback) {
@@ -479,11 +488,16 @@ async function notify(text) {
     connectionRetries: 5,
     proxy: parseSocksProxy(process.env.TELEGRAM_PROXY_URL)
   });
-  await client.connect();
+  const releaseSessionLock = await acquireTelegramSendLock("telegram-contract-cycle:notify");
   try {
+    await client.connect();
     await sendTelegramNotification(client, text);
   } finally {
-    await client.disconnect();
+    try {
+      await client.disconnect();
+    } finally {
+      await releaseSessionLock();
+    }
   }
 }
 
@@ -557,7 +571,7 @@ function launchPreparedSender(inputPath) {
 }
 
 async function buildPreparedContractPayload(cards) {
-  const skipAlreadySent = argValue("skipAlreadySent", process.env.TELEGRAM_SKIP_ALREADY_SENT || "true") === "true";
+  const skipAlreadySent = argValue("skipAlreadySent", process.env.TELEGRAM_SKIP_ALREADY_SENT || "false") === "true";
   const sentContracts = skipAlreadySent ? await readSentContracts() : {};
   const threshold = repeatThreshold();
   const repeatTarget = repeatNotifyTarget();
@@ -593,7 +607,7 @@ async function buildPreparedContractPayload(cards) {
 
   console.log(
     `Prepared contract routing: ${normalCount} to ${notifyTarget() || "TELEGRAM_NOTIFY_TARGET"}, ` +
-    `${repeatCount} to ${repeatTarget}; skipped already sent within ${dedupeWindowHours()}h: ${skipped}.`
+    `${repeatCount} to ${repeatTarget}; dedupe ${skipAlreadySent ? `${dedupeWindowHours()}h` : "disabled"}; skipped ${skipped}.`
   );
   return {
     source: "telegram-contracts",
@@ -629,7 +643,7 @@ async function streamContractBatches(baseCards, duplicateCsv, resultJsonPath) {
   const rpm = dexRequestsPerMinute();
   const ageHours = onChainAgeHours();
   const batchSize = Number(argValue("batchSize", process.env.TELEGRAM_CONTRACT_BATCH_SIZE || "80"));
-  const safeBatchSize = Number.isFinite(batchSize) ? Math.max(20, Math.min(250, Math.trunc(batchSize))) : 80;
+  const safeBatchSize = Number.isFinite(batchSize) ? Math.max(5, Math.min(250, Math.trunc(batchSize))) : 80;
   let totalFound = 0;
   let totalSendable = 0;
   let launched = 0;
@@ -670,14 +684,15 @@ async function notifyMany(cards) {
   const apiHash = String(process.env.TELEGRAM_API_HASH || "").trim();
   const stringSession = String(process.env.TELEGRAM_STRING_SESSION || "").trim();
   if (!apiId || !apiHash || !stringSession) throw new Error("Telegram session config is missing.");
-  const skipAlreadySent = argValue("skipAlreadySent", process.env.TELEGRAM_SKIP_ALREADY_SENT || "true") === "true";
+  const skipAlreadySent = argValue("skipAlreadySent", process.env.TELEGRAM_SKIP_ALREADY_SENT || "false") === "true";
   const sentContracts = await readSentContracts();
   const client = new TelegramClient(new StringSession(stringSession), apiId, apiHash, {
     connectionRetries: 5,
     proxy: parseSocksProxy(process.env.TELEGRAM_PROXY_URL)
   });
-  await client.connect();
+  const releaseSessionLock = await acquireTelegramSendLock("telegram-contract-cycle");
   try {
+    await client.connect();
     if (skipAlreadySent) await seedSentContractsFromTelegram(client, sentContracts);
     let sentCount = 0;
     let skippedCount = 0;
@@ -709,30 +724,29 @@ async function notifyMany(cards) {
       `Telegram routing: ${normalCount} to ${notifyTarget() || "TELEGRAM_NOTIFY_TARGET"}, ` +
       `${repeatCount} to ${repeatTarget}${repeatEntity ? ` (${entityLabel(repeatEntity)})` : ""}; repeat threshold >=${threshold}.`
     );
-    const releaseSendLock = await acquireTelegramSendLock("telegram-contract-cycle");
-    try {
-      for (let index = 0; index < pendingItems.length; index += 1) {
-        const { card, route } = pendingItems[index];
-        const key = contractKey(card.address);
-        const message = formatContractCard(card);
-        await sendNotificationMessage(client, message, route === "repeat" ? repeatEntity : null);
-        sentCount += 1;
-        sentContracts[key] = {
-          address: card.address,
-          sentAt: new Date().toISOString(),
-          rank: card.rank,
-          count: card.count,
-          target: route === "repeat" ? repeatTarget : notifyTarget()
-        };
-        await writeSentContracts(sentContracts);
-        if (index < pendingItems.length - 1 && delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
-    } finally {
-      await releaseSendLock();
+    for (let index = 0; index < pendingItems.length; index += 1) {
+      const { card, route } = pendingItems[index];
+      const key = contractKey(card.address);
+      const message = formatContractCard(card);
+      await sendNotificationMessage(client, message, route === "repeat" ? repeatEntity : null);
+      sentCount += 1;
+      sentContracts[key] = {
+        address: card.address,
+        sentAt: new Date().toISOString(),
+        rank: card.rank,
+        count: card.count,
+        target: route === "repeat" ? repeatTarget : notifyTarget()
+      };
+      await writeSentContracts(sentContracts);
+      if (index < pendingItems.length - 1 && delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
     console.log(`Telegram notifications sent: ${sentCount}; skipped already sent: ${skippedCount}.`);
   } finally {
-    await client.disconnect();
+    try {
+      await client.disconnect();
+    } finally {
+      await releaseSessionLock();
+    }
   }
 }
 

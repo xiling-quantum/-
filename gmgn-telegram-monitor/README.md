@@ -20,10 +20,10 @@ TELEGRAM_API_HASH=...
 TELEGRAM_STRING_SESSION=...
 TELEGRAM_NOTIFY_TARGET=me
 TELEGRAM_PROXY_URL=socks5://127.0.0.1:7897
-TELEGRAM_SEND_LOCK_FILE=data/telegram-send.lock
+TELEGRAM_SEND_LOCK_FILE=../telegram-session.lock
 ```
 
-When user-session mode is enabled, the monitor connects to Telegram only while sending a new alert. Keep `TELEGRAM_STRING_SESSION` and `TELEGRAM_SEND_LOCK_FILE` independent from other local projects.
+When user-session mode is enabled, the monitor connects to Telegram only while sending a new alert. If another local project uses the same `TELEGRAM_STRING_SESSION`, point both projects at the same `TELEGRAM_SEND_LOCK_FILE` so only one MTProto client is connected at a time.
 
 For a group, send any message in the group, then open:
 
