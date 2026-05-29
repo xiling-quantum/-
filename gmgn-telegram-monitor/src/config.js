@@ -40,7 +40,8 @@ export function loadConfig() {
     side: optional(process.env.SIDE) ?? "all",
     minAmountUsd: optional(process.env.MIN_AMOUNT_USD),
     maxAmountUsd: optional(process.env.MAX_AMOUNT_USD),
-    walletFilter: optional(process.env.WALLET_FILTER),
+    gmgnWebFollowSync: toBool(process.env.GMGN_WEB_FOLLOW_SYNC, true),
+    configuredWalletFilter: optional(process.env.WALLET_FILTER),
     walletAliasFile: path.resolve(rootDir, optional(process.env.WALLET_ALIAS_FILE) ?? "data/wallet-aliases.json"),
     walletAutoNumberAliases: toBool(process.env.WALLET_AUTO_NUMBER_ALIASES, true),
     dryRun: toBool(process.env.DRY_RUN, false),
@@ -77,6 +78,8 @@ export function loadConfig() {
     config.telegramSendMode =
       config.telegramBotToken && config.telegramChatId ? "bot" : "user";
   }
+
+  config.walletFilter = config.gmgnWebFollowSync ? undefined : config.configuredWalletFilter;
 
   return config;
 }

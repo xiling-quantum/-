@@ -1,5 +1,5 @@
 import { loadConfig, validateConfig } from "./config.js";
-import { fetchFollowWalletTrades } from "./gmgn.js";
+import { enrichWalletProfiles, fetchFollowWalletTrades } from "./gmgn.js";
 import { formatTradeCards } from "./format.js";
 import { sendTelegramMessage } from "./telegram.js";
 import { loadState, saveState, tradeKey } from "./store.js";
@@ -34,7 +34,7 @@ async function poll(config, state) {
     return;
   }
 
-  const fresh = sortOldestFirst(trades)
+  let fresh = sortOldestFirst(trades)
     .filter((trade) => {
       const key = tradeKey(trade);
       return key && !seen.has(key);
@@ -42,6 +42,7 @@ async function poll(config, state) {
     .slice(0, config.maxMessagesPerPoll);
 
   if (fresh.length > 0) {
+    fresh = await enrichWalletProfiles(config, fresh);
     let narratives = new Map();
     try {
       narratives = await enrichTradeNarratives(config, fresh);
@@ -71,7 +72,13 @@ async function main() {
   configureProxy();
 
   const state = await loadState(config.stateFile);
-  console.log(`GMGN Telegram monitor started. chain=${config.chain}, interval=${config.pollIntervalMs / 1000}s`);
+  const walletSource = config.gmgnWebFollowSync
+    ? "gmgn-web-follow-list"
+    : `wallet-filter:${config.walletFilter || "all-followed"}`;
+  console.log(
+    `GMGN Telegram monitor started. chain=${config.chain}, interval=${config.pollIntervalMs / 1000}s, ` +
+    `walletSource=${walletSource}`
+  );
 
   if (once) {
     await poll(config, state);

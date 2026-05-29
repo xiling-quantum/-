@@ -46,6 +46,7 @@ By default, the first startup records existing GMGN trades without pushing them,
 - `CHAIN`: `sol`, `bsc`, `base`, or `eth`
 - `SIDE`: `all`, `buy`, or `sell`
 - `MIN_AMOUNT_USD` / `MAX_AMOUNT_USD`: amount filters
+- `GMGN_WEB_FOLLOW_SYNC`: when `true`, use the wallet set currently followed in GMGN web and ignore `WALLET_FILTER`
 - `WALLET_FILTER`: one followed wallet address
 - `WALLET_ALIAS_FILE`: optional local JSON/CSV/TSV mapping from wallet address to alias
 - `WALLET_AUTO_NUMBER_ALIASES`: auto-assign `1号`, `2号`, etc. to newly seen wallets and keep old numbers
@@ -65,6 +66,8 @@ CSV and TSV files are also accepted when they contain address/name, wallet/remar
 
 When `WALLET_AUTO_NUMBER_ALIASES=true`, the monitor writes new wallets to the JSON alias file with the next available number. Removed wallets stay in the file, so existing numbers are not changed.
 
+Messages prefer GMGN public wallet profile names or Twitter names when the API exposes them, then fall back to the local alias number and short address. Private GMGN follow-list remarks may not be exposed by the API.
+
 ## Notes
 
-GMGN `follow-wallet` returns trades from wallets you personally follow on the GMGN platform. Manage the wallet list in GMGN; this service only polls and forwards the feed.
+GMGN `follow-wallet` returns trades from wallets you personally follow on the GMGN platform. With `GMGN_WEB_FOLLOW_SYNC=true`, manage the wallet list in GMGN web: newly followed wallets are picked up by the next poll, and unfollowed wallets stop producing new forwarded trades. Keep `WALLET_FILTER` empty for this mode.

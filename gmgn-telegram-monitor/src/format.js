@@ -99,11 +99,26 @@ function walletAlias(walletAliases, address) {
   return walletAliases.get(address) || walletAliases.get(String(address).toLowerCase()) || "";
 }
 
+function walletPlatformName(trade) {
+  return (
+    trade.maker_info?.name ||
+    trade.maker_info?.nick_name ||
+    trade.maker_info?.twitter_name ||
+    trade.maker_info?.twitter_username ||
+    ""
+  );
+}
+
+function isAutoNumberAlias(alias) {
+  return /^\d+号$/.test(String(alias || "").trim());
+}
+
 function walletLabel(trade, walletAliases = new Map()) {
   const alias = walletAlias(walletAliases, trade.maker);
-  if (alias) return `${alias} / ${short(trade.maker)}`;
-  const name = trade.maker_info?.name || trade.maker_info?.twitter_username;
+  const name = walletPlatformName(trade);
+  if (name && alias && !isAutoNumberAlias(alias)) return `${name} / ${alias} / ${short(trade.maker)}`;
   if (name) return `${name} / ${short(trade.maker)}`;
+  if (alias && !isAutoNumberAlias(alias)) return `${alias} / ${short(trade.maker)}`;
   return short(trade.maker);
 }
 
@@ -120,7 +135,7 @@ function tradeLinks(trade) {
 
 export function formatTrade(trade) {
   const token = tokenLabel(trade);
-  const makerName = trade.maker_info?.name || trade.maker_info?.twitter_username || short(trade.maker);
+  const makerName = walletPlatformName(trade) || short(trade.maker);
   const side = directionLabel(trade.side);
   const txUrl =
     trade.chain === "sol"
@@ -197,7 +212,7 @@ export function formatTradeCards(trades, title = "GMGN Follow Wallet", narrative
   const now = tradeTimeShanghaiShort(Date.now() / 1000);
   const lines = [
     `<b>${html(title)}</b>`,
-    `<code>SOL / ${trades.length} 条 / ${html(now)} 北京时间</code>`,
+    `SOL | ${trades.length} 条 | ${html(now)} 北京时间`,
     "",
   ];
 
@@ -209,11 +224,14 @@ export function formatTradeCards(trades, title = "GMGN Follow Wallet", narrative
     const time = tradeTimeShanghaiShort(trade.timestamp);
     const links = tradeLinks(trade);
 
-    lines.push(`<b>${index + 1}. ${html(direction)} ${html(token)}</b>  <code>${html(amount)}</code>`);
-    lines.push(`<code>${html(wallet)}</code>  ${html(time)}`);
+    lines.push(`<b>${index + 1}. ${html(direction)} ${html(token)}</b>`);
+    lines.push(`金额：<code>${html(amount)}</code>`);
+    lines.push(`钱包：${html(wallet)}`);
+    lines.push(`时间：${html(time)}`);
     const narrative = compactText(narrativeForTrade(trade, narratives), 96);
     if (narrative) lines.push(`叙事：${html(narrative)}`);
-    if (trade.base_address) lines.push(`CA <code>${html(short(trade.base_address, 5, 5))}</code>  ${links}`);
+    if (trade.base_address) lines.push(`CA：<code>${html(short(trade.base_address, 5, 5))}</code>`);
+    if (links) lines.push(links);
     if (index !== trades.length - 1) lines.push("");
   });
 
